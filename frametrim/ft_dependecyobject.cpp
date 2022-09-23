@@ -34,54 +34,62 @@
 
 namespace frametrim {
 
-UsedObject::UsedObject(unsigned id):
+template <class T>
+UsedObject<T>::UsedObject(T id):
     m_id(id),
     m_emitted(true)
 {
 
 }
 
-unsigned
-UsedObject::id() const
+template <class T>
+T
+UsedObject<T>::id() const
 {
     return m_id;
 }
 
+template <class T>
 bool
-UsedObject::emitted() const
+UsedObject<T>::emitted() const
 {
     return m_emitted;
 }
 
+template <class T>
 void
-UsedObject::addCall(PTraceCall call)
+UsedObject<T>::addCall(PTraceCall call)
 {
     m_calls.push_back(call);
     m_emitted = false;
 }
 
+template <class T>
 void
-UsedObject::setCall(PTraceCall call)
+UsedObject<T>::setCall(PTraceCall call)
 {
     m_calls.clear();
     addCall(call);
 }
 
+template <class T>
 void
-UsedObject::addDependency(Pointer dep)
+UsedObject<T>::addDependency(Pointer dep)
 {
     m_dependencies.push_back(dep);
     m_emitted = false;
 }
 
-void UsedObject::setDependency(Pointer dep)
+template <class T>
+void UsedObject<T>::setDependency(Pointer dep)
 {
     m_dependencies.clear();
     addDependency(dep);
 }
 
+template <class T>
 void
-UsedObject::emitCallsTo(CallSet& out_list)
+UsedObject<T>::emitCallsTo(CallSet& out_list)
 {
     if (!m_emitted) {
         m_emitted = true;
@@ -93,23 +101,27 @@ UsedObject::emitCallsTo(CallSet& out_list)
     }
 }
 
-unsigned UsedObject::extraInfo(const std::string& key) const
+template <class T>
+unsigned UsedObject<T>::extraInfo(const std::string& key) const
 {
     auto v = m_extra_info.find(key);
     return (v != m_extra_info.end()) ? v->second : 0;
 }
 
-void UsedObject::setExtraInfo(const std::string& key, unsigned value)
+template <class T>
+void UsedObject<T>::setExtraInfo(const std::string& key, unsigned value)
 {
     m_extra_info[key] = value;
 }
 
-void UsedObject::eraseExtraInfo(const std::string& key)
+template <class T>
+void UsedObject<T>::eraseExtraInfo(const std::string& key)
 {
     m_extra_info.erase(key);
 }
 
-bool UsedObject::createdBefore(unsigned callno) const
+template <class T>
+bool UsedObject<T>::createdBefore(unsigned callno) const
 {
     if (m_calls.empty())
         return false;
@@ -117,15 +129,22 @@ bool UsedObject::createdBefore(unsigned callno) const
     return callno > 0 && m_calls[0]->callNo() < callno;
 }
 
+unsigned
+toKey(const trace::Value *v)
+{
+    return v->toUInt();
+}
+
+template <class T>
 void
-DependecyObjectMap::generate_internal(const trace::Call& call, int array_id)
+DependecyObjectMap<T>::generate_internal(const trace::Call& call, int array_id)
 {
     auto c = trace2call(call);
     const auto ids = (call.arg(array_id)).toArray();
-    std::vector<std::shared_ptr<UsedObject> > created_objs;
+    std::vector<ObjectPtr> created_objs;
     for (auto& v : ids->values) {
-        auto old_obj = getById(v->toUInt());
-        auto obj = old_obj ? old_obj : std::make_shared<UsedObject>(v->toUInt());
+        auto old_obj = getById(toKey(v));
+        auto obj = old_obj ? old_obj : std::make_shared<UsedObject<T> >(toKey(v));
         obj->addCall(c);
         obj->setExtraInfo("valid", 1);
         if (old_obj) {
@@ -133,7 +152,7 @@ DependecyObjectMap::generate_internal(const trace::Call& call, int array_id)
         } else {
             obj->setExtraInfo("create_call", call.no);
         }
-        addObject(v->toUInt(), obj);
+        addObject(toKey(v), obj);
 
         // make all objects that are created together depend on each other
         for (auto& o : created_objs) {
@@ -144,21 +163,21 @@ DependecyObjectMap::generate_internal(const trace::Call& call, int array_id)
     }
 }
 
-void
-DependecyObjectMap::generate(const trace::Call& call)
+template <class T>
+void DependecyObjectMap<T>::generate(const trace::Call& call)
 {
     generate_internal(call, 1); 
 }
 
-void DependecyObjectMap::destroy(const trace::Call& call)
+template <class T>
+void DependecyObjectMap<T>::destroy(const trace::Call& call)
 {
     auto c = trace2call(call);
-    std::vector<std::shared_ptr<UsedObject> > destroyed_objs;
+    std::vector<std::shared_ptr<UsedObject<T> > > destroyed_objs;
     const auto ids = (call.arg(1)).toArray();
     assert(ids);
     for (auto& v : ids->values) {
-        unsigned obj_id = v->toUInt();
-        auto obj_it = m_objects.find(obj_id);
+        auto obj_it = m_objects.find(toKey(v));
         if (obj_it != m_objects.end()) {
             assert(obj_it->second->id() == obj_id);
             obj_it->second->addCall(c);
@@ -178,31 +197,36 @@ void DependecyObjectMap::destroy(const trace::Call& call)
     }
 }
 
-void DependecyObjectMap::create(const trace::Call& call)
+template <class T>
+void DependecyObjectMap<T>::create(const trace::Call& call)
 {
-    auto obj = std::make_shared<UsedObject>(call.ret->toUInt());
-    addObject(call.ret->toUInt(), obj);
+    auto key = toKey(call.ret);
+    auto obj = std::make_shared<UsedObject<T>>(key);
+    addObject(key, obj);
     auto c = trace2call(call);
     obj->addCall(c);
     obj->setExtraInfo("valid", 1);
 }
 
-void DependecyObjectMap::del(const trace::Call& call)
+template <class T>
+void DependecyObjectMap<T>::del(const trace::Call& call)
 {
-    auto obj_it = m_objects.find(call.arg(0).toUInt());
+    auto obj_it = m_objects.find(toKey(&call.arg(0)));
     if (obj_it != m_objects.end()) {
         obj_it->second->addCall(trace2call(call));
         obj_it->second->setExtraInfo("valid", 0);
     }
 }
 
-void DependecyObjectMap::addObject(unsigned id, UsedObject::Pointer obj)
+template <class T>
+void DependecyObjectMap<T>::addObject(T id, ObjectPtr obj)
 {
     m_objects[id] = obj;
 }
 
-UsedObject::Pointer
-DependecyObjectMap::bind(const trace::Call& call, unsigned obj_id_param)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::bind(const trace::Call& call, unsigned obj_id_param)
 {
     unsigned id = call.arg(obj_id_param).toUInt();
     if (!setTargetType(id, call.arg(0).toUInt()))  {
@@ -233,15 +257,17 @@ DependecyObjectMap::bind(const trace::Call& call, unsigned obj_id_param)
     return bindTarget(id, bindpoint);
 }
 
-bool DependecyObjectMap::setTargetType(unsigned id, unsigned target)
+template <class T>
+bool DependecyObjectMap<T>::setTargetType(unsigned id, unsigned target)
 {
     (void)id;
     (void)target;
     return true;
 }
 
-UsedObject::Pointer
-DependecyObjectMap::bindTarget(unsigned id, unsigned bindpoint)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::bindTarget(unsigned id, unsigned bindpoint)
 {
     if (id) {
         m_bound_object[bindpoint] = m_objects[id];
@@ -251,44 +277,52 @@ DependecyObjectMap::bindTarget(unsigned id, unsigned bindpoint)
     return m_bound_object[bindpoint];
 }
 
-UsedObject::Pointer
-DependecyObjectMap::bind( unsigned bindpoint, unsigned id)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::bind( unsigned bindpoint, T id)
 {
     return m_bound_object[bindpoint] = m_objects[id];
 }
 
-UsedObject::Pointer
-DependecyObjectMap::boundTo(unsigned target, unsigned index)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::boundTo(unsigned target, unsigned index)
 {
     unsigned bindpoint = getBindpoint(target, index);
     return boundAtBinding(bindpoint);
 }
 
-DependecyObjectMap::ObjectMap::iterator
-DependecyObjectMap::begin()
+template <class T>
+typename DependecyObjectMap<T>::ObjectMap::iterator
+DependecyObjectMap<T>::begin()
 {
     return m_bound_object.begin();
 }
 
-DependecyObjectMap::ObjectMap::iterator
-DependecyObjectMap::end()
+template <class T>
+typename DependecyObjectMap<T>::ObjectMap::iterator
+DependecyObjectMap<T>::end()
 {
     return m_bound_object.end();
 }
 
-UsedObject::Pointer DependecyObjectMap::boundAtBinding(unsigned index)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::boundAtBinding(unsigned index)
 {
     return m_bound_object[index];
 }
 
-unsigned DependecyObjectMap::getBindpoint(unsigned target, unsigned index) const
+template <class T>
+unsigned DependecyObjectMap<T>::getBindpoint(unsigned target, unsigned index) const
 {
     (void)index;
     return target;
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnBoundObject(const trace::Call& call)
+DependecyObjectMap<T>::callOnBoundObject(const trace::Call& call)
 {
     unsigned bindpoint = getBindpointFromCall(call);
     if (bindpoint == 0xffffffff) {
@@ -303,19 +337,21 @@ DependecyObjectMap::callOnBoundObject(const trace::Call& call)
     m_bound_object[bindpoint]->addCall(trace2call(call));
 }
 
-UsedObject::Pointer
-DependecyObjectMap::bindWithCreate(const trace::Call& call, unsigned obj_id_param)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::bindWithCreate(const trace::Call& call, unsigned obj_id_param)
 {
     unsigned bindpoint = getBindpointFromCall(call);
     unsigned id = call.arg(obj_id_param).toUInt();
     if (!m_objects[id])  {
-        m_objects[id] = std::make_shared<UsedObject>(id);
+        m_objects[id] = std::make_shared<UsedObject<T>>(id);
     }
     return bindTarget(id, bindpoint);
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnObjectBoundTo(const trace::Call& call, unsigned bindpoint)
+DependecyObjectMap<T>::callOnObjectBoundTo(const trace::Call& call, unsigned bindpoint)
 {
     auto obj = boundTo(bindpoint);
 
@@ -324,8 +360,9 @@ DependecyObjectMap::callOnObjectBoundTo(const trace::Call& call, unsigned bindpo
     obj->addCall(trace2call(call));
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnNamedObject(const trace::Call& call)
+DependecyObjectMap<T>::callOnNamedObject(const trace::Call& call)
 {
     auto obj = m_objects[call.arg(0).toUInt()];
     if (!obj) {
@@ -339,11 +376,12 @@ DependecyObjectMap::callOnNamedObject(const trace::Call& call)
         obj->addCall(trace2call(call));
 }
 
-UsedObject::Pointer
-DependecyObjectMap::callOnBoundObjectWithDep(const trace::Call& call,
-                                             DependecyObjectMap& other_objects,
-                                             int dep_obj_param,
-                                             bool reverse_dep_too)
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::callOnBoundObjectWithDep(const trace::Call& call,
+                                                DependecyObjectMap<T>& other_objects,
+                                                int dep_obj_param,
+                                                bool reverse_dep_too)
 {
     unsigned obj_id = call.arg(dep_obj_param).toUInt();
     unsigned bindpoint = getBindpointFromCall(call);
@@ -353,7 +391,7 @@ DependecyObjectMap::callOnBoundObjectWithDep(const trace::Call& call,
         return nullptr; 
     }
 
-    UsedObject::Pointer obj = nullptr;
+    ObjectPtr obj = nullptr;
     
     if (obj_id) {
         obj = other_objects.getById(obj_id);
@@ -366,10 +404,11 @@ DependecyObjectMap::callOnBoundObjectWithDep(const trace::Call& call,
     return obj;
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnBoundObjectWithDepBoundTo(const trace::Call& call,
-                                                    DependecyObjectMap& other_objects,
-                                                    int bindingpoint)
+DependecyObjectMap<T>::callOnBoundObjectWithDepBoundTo(const trace::Call& call,
+                                                       DependecyObjectMap<T>& other_objects,
+                                                       int bindingpoint)
 {
     unsigned bindpoint = getBindpointFromCall(call);
     if (!m_bound_object[bindpoint]) {
@@ -377,7 +416,7 @@ DependecyObjectMap::callOnBoundObjectWithDepBoundTo(const trace::Call& call,
     }
     m_bound_object[bindpoint]->addCall(trace2call(call));
 
-    UsedObject::Pointer obj = nullptr;
+    ObjectPtr obj = nullptr;
     auto dep = other_objects.boundTo(bindingpoint);
     if (dep) {
         m_bound_object[bindpoint]->addDependency(dep);
@@ -387,11 +426,12 @@ DependecyObjectMap::callOnBoundObjectWithDepBoundTo(const trace::Call& call,
 
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnNamedObjectWithDep(const trace::Call& call,
-                                             DependecyObjectMap& other_objects,
-                                             int dep_obj_param,
-                                             bool reverse_dep_too)
+DependecyObjectMap<T>::callOnNamedObjectWithDep(const trace::Call& call,
+                                                DependecyObjectMap<T>& other_objects,
+                                                int dep_obj_param,
+                                                bool reverse_dep_too)
 {
     auto obj = m_objects[call.arg(0).toUInt()];
 
@@ -417,10 +457,11 @@ DependecyObjectMap::callOnNamedObjectWithDep(const trace::Call& call,
     obj->addCall(trace2call(call));
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnNamedObjectWithNamedDep(const trace::Call& call,
-                                                  DependecyObjectMap& other_objects,
-                                                  int dep_call_param)
+DependecyObjectMap<T>::callOnNamedObjectWithNamedDep(const trace::Call& call,
+                                                     DependecyObjectMap<T>& other_objects,
+                                                     int dep_call_param)
 {
     auto obj = getById(call.arg(0).toUInt());
 
@@ -438,10 +479,11 @@ DependecyObjectMap::callOnNamedObjectWithNamedDep(const trace::Call& call,
     }
 }
 
+template <class T>
 void
-DependecyObjectMap::callOnNamedObjectWithDepBoundTo(const trace::Call& call,
-                                                    DependecyObjectMap& other_objects,
-                                                    int dep_call_param)
+DependecyObjectMap<T>::callOnNamedObjectWithDepBoundTo(const trace::Call& call,
+                                                       DependecyObjectMap<T>& other_objects,
+                                                       int dep_call_param)
 {
     auto obj = getById(call.arg(0).toUInt());
     if (!obj) {
@@ -461,20 +503,23 @@ DependecyObjectMap::callOnNamedObjectWithDepBoundTo(const trace::Call& call,
 }
 
 
-void DependecyObjectMap::addCall(PTraceCall call)
+template <class T>
+void DependecyObjectMap<T>::addCall(PTraceCall call)
 {
     m_calls.push_back(call);
 }
 
-UsedObject::Pointer
-DependecyObjectMap::getById(unsigned id) const
+template <class T>
+typename DependecyObjectMap<T>::ObjectPtr
+DependecyObjectMap<T>::getById(T id) const
 {
     auto i = m_objects.find(id);
     return i !=  m_objects.end() ? i->second : nullptr;
 }
 
+template <class T>
 void
-DependecyObjectMap::emitBoundObjects(CallSet& out_calls)
+DependecyObjectMap<T>::emitBoundObjects(CallSet& out_calls)
 {
     for (auto&& [key, obj]: m_bound_object) {
         if (obj)
@@ -484,7 +529,8 @@ DependecyObjectMap::emitBoundObjects(CallSet& out_calls)
         out_calls.insert(c);
 }
 
-void DependecyObjectMap::addBoundAsDependencyTo(UsedObject& obj)
+template <class T>
+void DependecyObjectMap<T>::addBoundAsDependencyTo(UsedObject<T>& obj)
 {
     for (auto&& [key, bound_obj]: m_bound_object) {
         if (bound_obj)
@@ -492,23 +538,31 @@ void DependecyObjectMap::addBoundAsDependencyTo(UsedObject& obj)
     }
 }
 
-void DependecyObjectMap::emitBoundObjectsExt(CallSet& out_calls)
+template <class T>
+void DependecyObjectMap<T>::emitBoundObjectsExt(CallSet& out_calls)
 {
     (void)out_calls;
 }
 
+template <class T>
 unsigned
-DependecyObjectWithSingleBindPointMap::getBindpointFromCall(const trace::Call& call) const
+DependecyObjectWithSingleBindPointMap<T>::getBindpointFromCall(const trace::Call& call) const
 {
     (void)call;
     return 0;
 }
 
+template <class T>
 unsigned
-DependecyObjectWithDefaultBindPointMap::getBindpointFromCall(const trace::Call& call) const
+DependecyObjectWithDefaultBindPointMap<T>::getBindpointFromCall(const trace::Call& call) const
 {
     return call.arg(0).toUInt();
 }
+
+template class UsedObject<unsigned>;
+template class DependecyObjectMap<unsigned>;
+template class DependecyObjectWithSingleBindPointMap<unsigned>;
+template class DependecyObjectWithDefaultBindPointMap<unsigned>;
 
 void BufferObjectMap::bindBuffer(const trace::Call& call)
 {
@@ -529,7 +583,7 @@ void BufferObjectMap::bindBuffer(const trace::Call& call)
 }
 
 
-UsedObject::Pointer
+UsedObject<unsigned>::Pointer
 BufferObjectMap::boundToTarget(unsigned target)
 {
     return boundTo(target, 0);
@@ -735,7 +789,7 @@ BufferObjectMap::memcopy(const trace::Call& call, CallSet& out_set, bool recordi
         buf->emitCallsTo(out_set);
 }
 
-void BufferObjectMap::addSSBODependencies(UsedObject::Pointer dep)
+void BufferObjectMap::addSSBODependencies(ObjectPtr dep)
 {
     for(auto && [key, buf]: *this) {
         if (buf && ((key % bt_last) == bt_ssbo)) {
@@ -774,7 +828,7 @@ void
 VertexAttribObjectMap::bindAVO(const trace::Call& call, BufferObjectMap& buffers)
 {
     unsigned id = call.arg(0).toUInt();
-    auto obj = std::make_shared<UsedObject>(next_id);
+    auto obj = std::make_shared<UsedObject<unsigned>>(next_id);
     addObject(next_id, obj);
     bind(id, next_id);
     auto c = trace2call(call);
@@ -797,7 +851,7 @@ VertexAttribObjectMap::bindAVO(const trace::Call& call, BufferObjectMap& buffers
 void VertexAttribObjectMap::bindVAOBuf(const trace::Call& call, BufferObjectMap& buffers)
 {
     unsigned id = call.arg(0).toUInt();
-    auto obj = std::make_shared<UsedObject>(next_id);
+    auto obj = std::make_shared<UsedObject<unsigned>>(next_id);
     addObject(next_id, obj);
     bind(id, next_id);
     obj->addCall(trace2call(call));
@@ -854,7 +908,7 @@ enum TexTypes {
     gl_texture_last
 };
 
-UsedObject::Pointer
+UsedObject<unsigned>::Pointer
 TextureObjectMap::oglBindMultitex(const trace::Call& call)
 {
     unsigned unit = call.arg(0).toUInt() - GL_TEXTURE0;
@@ -874,7 +928,7 @@ bool TextureObjectMap::setTargetType(unsigned id, unsigned target)
         return true;
     auto tex = getById(id);
     if (!tex) {
-        tex = std::make_shared<UsedObject>(id);
+        tex = std::make_shared<UsedObject<unsigned>>(id);
         addObject(id, tex);
     }
 
@@ -919,7 +973,7 @@ void TextureObjectMap::bindToImageUnit(const trace::Call& call)
     }
 }
 
-void TextureObjectMap::bindFromTextureTarget(unsigned unit, UsedObject::Pointer obj)
+void TextureObjectMap::bindFromTextureTarget(unsigned unit, ObjectPtr obj)
 {
     unsigned target = obj->extraInfo("target");
     assert(target > 0);
@@ -951,7 +1005,7 @@ void TextureObjectMap::emitBoundObjectsExt(CallSet& out_calls)
             tex->emitCallsTo(out_calls);
 }
 
-void TextureObjectMap::addImageDependencies(UsedObject::Pointer dep)
+void TextureObjectMap::addImageDependencies(ObjectPtr dep)
 {
     for (auto&& [key, tex]: m_bound_images) {
         if (tex) {
@@ -1083,7 +1137,7 @@ void QueryObjectMap::endWithTargetIndex(unsigned target, unsigned index, const t
 
 FramebufferObjectMap::FramebufferObjectMap()
 {
-    auto default_fb = std::make_shared<UsedObject>(0);
+    auto default_fb = std::make_shared<UsedObject<unsigned>>(0);
     addObject(0, default_fb);
     bind(GL_DRAW_FRAMEBUFFER, 0);
     bind(GL_READ_FRAMEBUFFER, 0);
@@ -1095,10 +1149,10 @@ FramebufferObjectMap::getBindpointFromCall(const trace::Call& call) const
     return call.arg(0).toUInt();
 }
 
-UsedObject::Pointer
+UsedObject<unsigned>::Pointer
 FramebufferObjectMap::bindTarget(unsigned id, unsigned bindpoint)
 {
-    UsedObject::Pointer obj = nullptr;
+    ObjectPtr obj = nullptr;
     if (bindpoint == GL_FRAMEBUFFER ||
         bindpoint == GL_DRAW_FRAMEBUFFER) {
         bind(GL_FRAMEBUFFER, id);

@@ -62,15 +62,16 @@ struct string_part_less {
     }
 };
 
-using DisplayListMap = std::unordered_map<unsigned, UsedObject::Pointer>;
-using LegacyProgrambjectMap = DependecyObjectWithDefaultBindPointMap;
-using ProgramObjectMap = DependecyObjectWithSingleBindPointMap;
-using ProgramPipelineObjectMap = DependecyObjectWithSingleBindPointMap;
-using SamplerObjectMap = DependecyObjectWithDefaultBindPointMap;
-using SyncObjectMap = DependecyObjectWithSingleBindPointMap;
-using ShaderStateMap = DependecyObjectWithDefaultBindPointMap;
-using RenderObjectMap = DependecyObjectWithSingleBindPointMap;
-using VertexArrayMap = DependecyObjectWithDefaultBindPointMap;
+using DependencyMap = DependecyObjectMap<unsigned>;
+using DisplayListMap = std::unordered_map<unsigned, UsedObject<unsigned>::Pointer>;
+using LegacyProgrambjectMap = DependecyObjectWithDefaultBindPointMap<unsigned>;
+using ProgramObjectMap = DependecyObjectWithSingleBindPointMap<unsigned>;
+using ProgramPipelineObjectMap = DependecyObjectWithSingleBindPointMap<unsigned>;
+using SamplerObjectMap = DependecyObjectWithDefaultBindPointMap<unsigned>;
+using SyncObjectMap = DependecyObjectWithSingleBindPointMap<unsigned>;
+using ShaderStateMap = DependecyObjectWithDefaultBindPointMap<unsigned>;
+using RenderObjectMap = DependecyObjectWithSingleBindPointMap<unsigned>;
+using VertexArrayMap = DependecyObjectWithDefaultBindPointMap<unsigned>;
 
 enum ePerContext {
     pc_vertex_array,
@@ -86,7 +87,7 @@ struct PerContextObjects {
 
 struct FrameTrimmeImpl {
 
-    using ObjectMap = std::unordered_map<unsigned, UsedObject::Pointer>;
+    using ObjectMap = std::unordered_map<unsigned, UsedObject<unsigned>::Pointer>;
 
     FrameTrimmeImpl(bool keep_all_states);
     void call(const trace::Call& call, Frametype frametype);
@@ -126,18 +127,18 @@ struct FrameTrimmeImpl {
     void oglNewList(const trace::Call& call);
     void oglCallList(const trace::Call& call);
     void oglDeleteLists(const trace::Call& call);
-    void oglBind(const trace::Call& call, DependecyObjectMap& map, unsigned bind_param);
+    void oglBind(const trace::Call& call, DependencyMap& map, unsigned bind_param);
     void oglDraw(const trace::Call& call);
     void oglBindFbo(const trace::Call& call, unsigned bind_param);
     void oglBindTextures(const trace::Call& call);
     void oglBindSamplers(const trace::Call& call);
-    void bindWithCreate(const trace::Call& call, DependecyObjectMap& map,
+    void bindWithCreate(const trace::Call& call, DependencyMap& map,
                         unsigned bind_param);
     void oglWaitSync(const trace::Call& call);
-    void callOnBoundObjWithDep(const trace::Call& call, DependecyObjectMap& map,
-                               unsigned obj_id_param, DependecyObjectMap &dep_map, bool reverse_dep_too);
+    void callOnBoundObjWithDep(const trace::Call& call, DependencyMap& map,
+                               unsigned obj_id_param, DependencyMap &dep_map, bool reverse_dep_too);
 
-    void callOnNamedObjectWithNamedDep(const trace::Call& call, ePerContext object_type, DependecyObjectMap &dep_map,
+    void callOnNamedObjectWithNamedDep(const trace::Call& call, ePerContext object_type, DependencyMap &dep_map,
                                        unsigned dep_id_param);
 
     void oglBindMultitex(const trace::Call& call);
@@ -149,7 +150,7 @@ struct FrameTrimmeImpl {
     void ignoreHistory(const trace::Call& call);
 
     bool skipDeleteObj(const trace::Call& call);
-    bool skipDeleteImpl(unsigned obj_id, DependecyObjectMap& map);
+    bool skipDeleteImpl(unsigned obj_id, DependencyMap& map);
     void finalize();
 
     bool checkCommonSuffixes(const char *suffix) const;
@@ -159,15 +160,15 @@ struct FrameTrimmeImpl {
     void callOnBoundObject(const trace::Call& call, ePerContext map_type); 
     void callOnNamedObject(const trace::Call& call, ePerContext map_type); 
     void callOnObjectBoundTo(const trace::Call& call, ePerContext map_type, unsigned bindpoint);
-    void fboBindAttachment(const trace::Call& call, DependecyObjectMap& dep_map, unsigned tex_id_param);
-    void fboNamedBindAttachment(const trace::Call& call, DependecyObjectMap& dep_map, int obj_param_pos); 
+    void fboBindAttachment(const trace::Call& call, DependencyMap& dep_map, unsigned tex_id_param);
+    void fboNamedBindAttachment(const trace::Call& call, DependencyMap& dep_map, int obj_param_pos); 
     void fboBlit(const trace::Call& call);
     void fboBlitNamed(const trace::Call& call); 
     void fboReadBuffer(const trace::Call& call);
     void bindPerContext(const trace::Call& call, ePerContext map_type, unsigned bind_param);
 
 
-    DependecyObjectMap& getCurrentMapOfType(ePerContext map_type);
+    DependencyMap& getCurrentMapOfType(ePerContext map_type);
 
     void createContext(const trace::Call& call, int shared_param);
     void makeCurrent(const trace::Call& call, unsigned param);
@@ -180,7 +181,7 @@ struct FrameTrimmeImpl {
     CallSet m_required_calls;
     std::set<std::string> m_unhandled_calls;
     DisplayListMap m_display_lists;
-    UsedObject::Pointer m_active_display_list;
+    UsedObject<unsigned>::Pointer m_active_display_list;
 
     AllMatrisStates m_matrix_states;
 
@@ -426,7 +427,7 @@ FrameTrimmeImpl::skipDeleteObj(const trace::Call& call)
     if (!strcmp(call.name(), "glDeleteSync"))
         return skipDeleteImpl(call.arg(0).toUInt(), m_sync_objects);
 
-    DependecyObjectMap *map = nullptr;
+    DependencyMap *map = nullptr;
     if (!strcmp(call.name(), "glDeleteBuffers"))
         map = &m_buffers;
 
@@ -454,7 +455,7 @@ FrameTrimmeImpl::skipDeleteObj(const trace::Call& call)
 }
 
 bool
-FrameTrimmeImpl::skipDeleteImpl(unsigned obj_id, DependecyObjectMap& map)
+FrameTrimmeImpl::skipDeleteImpl(unsigned obj_id, DependencyMap& map)
 {
     auto obj = map.getById(obj_id);
     return !obj || (m_recording_frame && !obj->emitted()) || obj->createdBefore(m_last_frame_start);
@@ -597,7 +598,7 @@ void FrameTrimmeImpl::registerLegacyCalls()
 
     // shader calls
     MAP_OBJ(glGenPrograms, m_legacy_programs,
-               DependecyObjectWithDefaultBindPointMap::generate);
+               LegacyProgrambjectMap::generate);
     MAP_RV(glBindProgram, bindWithCreate, m_legacy_programs, 1);
 
     MAP_OBJ(glDeletePrograms, m_legacy_programs,
@@ -632,12 +633,12 @@ void FrameTrimmeImpl::registerLegacyCalls()
 void FrameTrimmeImpl::registerFramebufferCalls()
 {
     MAP_RV(glBindRenderbuffer, oglBind, m_renderbuffers, 1);
-    MAP_OBJ(glDeleteRenderbuffers, m_renderbuffers, DependecyObjectWithSingleBindPointMap::destroy);
-    MAP_OBJ(glGenRenderbuffers, m_renderbuffers, DependecyObjectWithSingleBindPointMap::generate);
-    MAP_OBJ(glCreateRenderbuffers, m_renderbuffers, DependecyObjectWithSingleBindPointMap::generate);
-    MAP_OBJ(glRenderbufferStorage, m_renderbuffers, DependecyObjectWithSingleBindPointMap::callOnBoundObject);
-    MAP_OBJ(glNamedRenderbufferStorage, m_renderbuffers, DependecyObjectWithSingleBindPointMap::callOnNamedObject);
-    MAP_OBJ(glRenderbufferStorageMultisample, m_renderbuffers, DependecyObjectWithSingleBindPointMap::callOnBoundObject);
+    MAP_OBJ(glDeleteRenderbuffers, m_renderbuffers, RenderObjectMap::destroy);
+    MAP_OBJ(glGenRenderbuffers, m_renderbuffers, RenderObjectMap::generate);
+    MAP_OBJ(glCreateRenderbuffers, m_renderbuffers, RenderObjectMap::generate);
+    MAP_OBJ(glRenderbufferStorage, m_renderbuffers, RenderObjectMap::callOnBoundObject);
+    MAP_OBJ(glNamedRenderbufferStorage, m_renderbuffers, RenderObjectMap::callOnNamedObject);
+    MAP_OBJ(glRenderbufferStorageMultisample, m_renderbuffers, RenderObjectMap::callOnBoundObject);
 
     MAP_V(glGenFramebuffers, generate, pc_fbo);
     MAP_V(glCreateFramebuffers, generate, pc_fbo);
@@ -1225,7 +1226,7 @@ FrameTrimmeImpl::oglGenLists(const trace::Call& call)
     unsigned nlists = call.arg(0).toUInt();
     GLuint origResult = (*call.ret).toUInt();
     for (unsigned i = 0; i < nlists; ++i)
-        m_display_lists[i + origResult] = std::make_shared<UsedObject>(i + origResult);
+        m_display_lists[i + origResult] = std::make_shared<UsedObject<unsigned>>(i + origResult);
 
     auto c = trace2call(call);
     if (!m_recording_frame)
@@ -1268,7 +1269,7 @@ FrameTrimmeImpl::oglDeleteLists(const trace::Call& call)
 }
 
 void
-FrameTrimmeImpl::oglBind(const trace::Call& call, DependecyObjectMap& map,
+FrameTrimmeImpl::oglBind(const trace::Call& call, DependencyMap& map,
                       unsigned bind_param)
 {
     auto bound_obj = map.bind(call, bind_param);
@@ -1469,7 +1470,7 @@ void FrameTrimmeImpl::oglDraw(const trace::Call& call)
 }
 
 void
-FrameTrimmeImpl::bindWithCreate(const trace::Call& call, DependecyObjectMap& map,
+FrameTrimmeImpl::bindWithCreate(const trace::Call& call, DependencyMap& map,
                                 unsigned bind_param)
 {
     auto bound_obj = map.bindWithCreate(call, bind_param);
@@ -1513,9 +1514,9 @@ FrameTrimmeImpl::oglBindFbo(const trace::Call& call, unsigned bind_param)
 }
 
 void
-FrameTrimmeImpl::callOnBoundObjWithDep(const trace::Call& call, DependecyObjectMap& map,
+FrameTrimmeImpl::callOnBoundObjWithDep(const trace::Call& call, DependencyMap& map,
                                         unsigned obj_id_param,
-                                        DependecyObjectMap& dep_map, bool reverse_dep_too)
+                                        DependencyMap& dep_map, bool reverse_dep_too)
 {
     auto dep_obj = map.callOnBoundObjectWithDep(call, dep_map, obj_id_param,
                                                 reverse_dep_too);
@@ -1525,7 +1526,7 @@ FrameTrimmeImpl::callOnBoundObjWithDep(const trace::Call& call, DependecyObjectM
 
 
 void FrameTrimmeImpl::callOnNamedObjectWithNamedDep(const trace::Call& call, ePerContext object_type,
-                                                    DependecyObjectMap &dep_map, unsigned dep_id_param)
+                                                    DependencyMap &dep_map, unsigned dep_id_param)
 {
     auto& map = getCurrentMapOfType(object_type);
     map.callOnNamedObjectWithNamedDep(call, dep_map, dep_id_param);
@@ -1614,12 +1615,12 @@ void FrameTrimmeImpl::callOnNamedObject(const trace::Call& call, ePerContext map
     getCurrentMapOfType(map_type).callOnNamedObject(call);
 }
 
-void FrameTrimmeImpl::fboBindAttachment(const trace::Call& call, DependecyObjectMap& dep_map, unsigned tex_id_param)
+void FrameTrimmeImpl::fboBindAttachment(const trace::Call& call, DependencyMap& dep_map, unsigned tex_id_param)
 {
     m_current_context->m_fbo.callOnBoundObjectWithDep(call, dep_map, tex_id_param, true);
 }
 
-void FrameTrimmeImpl::fboNamedBindAttachment(const trace::Call& call, DependecyObjectMap& dep_map, int obj_param_pos)
+void FrameTrimmeImpl::fboNamedBindAttachment(const trace::Call& call, DependencyMap& dep_map, int obj_param_pos)
 {
     m_current_context->m_fbo.callOnNamedObjectWithDep(call, dep_map, obj_param_pos, true); 
 }
@@ -1670,7 +1671,7 @@ void FrameTrimmeImpl::makeCurrent(const trace::Call& call, unsigned param)
     m_required_calls.insert(trace2call(call));
 }
 
-DependecyObjectMap& FrameTrimmeImpl::getCurrentMapOfType(ePerContext map_type)
+DependencyMap& FrameTrimmeImpl::getCurrentMapOfType(ePerContext map_type)
 {
     switch (map_type) {
     case pc_vertex_array: return m_current_context->m_vertex_arrays;

@@ -31,13 +31,14 @@
 
 namespace frametrim {
 
+template <class T>
 class UsedObject {
 public:
-    using Pointer = std::shared_ptr<UsedObject>;
+    using Pointer = std::shared_ptr<UsedObject<T> >;
 
-    UsedObject(unsigned id);
+    UsedObject(T id);
 
-    unsigned id() const;
+    T id() const;
 
     void addCall(PTraceCall call);
     void setCall(PTraceCall call);
@@ -58,14 +59,16 @@ private:
 
     std::vector<PTraceCall> m_calls;
     std::vector<Pointer> m_dependencies;
-    unsigned m_id;
+    T m_id;
     bool m_emitted;
     std::unordered_map<std::string, unsigned> m_extra_info;
 };
 
+template <class T>
 class DependecyObjectMap {
 public:
-    using ObjectMap=std::unordered_map<unsigned, UsedObject::Pointer>;
+    using ObjectPtr=typename UsedObject<T>::Pointer;
+    using ObjectMap=std::unordered_map<T, ObjectPtr>;
 
     void generate(const trace::Call& call);
     void destroy(const trace::Call& call);
@@ -73,12 +76,12 @@ public:
     void create(const trace::Call& call);
     void del(const trace::Call& call);
 
-    UsedObject::Pointer bind(const trace::Call& call, unsigned obj_id_param);
+    ObjectPtr bind(const trace::Call& call, unsigned obj_id_param);
     void callOnBoundObject(const trace::Call& call);
-    UsedObject::Pointer bindWithCreate(const trace::Call& call, unsigned obj_id_param);
+    ObjectPtr bindWithCreate(const trace::Call& call, unsigned obj_id_param);
     void callOnObjectBoundTo(const trace::Call& call, unsigned bindpoint);
     void callOnNamedObject(const trace::Call& call);
-    UsedObject::Pointer
+    ObjectPtr
     callOnBoundObjectWithDep(const trace::Call& call,
                              DependecyObjectMap& other_objects, int dep_obj_param, bool reverse_dep_too);
 
@@ -94,27 +97,27 @@ public:
     void callOnNamedObjectWithNamedDep(const trace::Call& call, DependecyObjectMap& other_objects,
                                        int dep_call_param);
 
-    UsedObject::Pointer getById(unsigned id) const;
+    ObjectPtr getById(T id) const;
     void addCall(PTraceCall call);
 
     void emitBoundObjects(CallSet& out_calls);
-    UsedObject::Pointer boundTo(unsigned target, unsigned index = 0);
+    ObjectPtr boundTo(unsigned target, unsigned index = 0);
 
-    ObjectMap::iterator begin();
-    ObjectMap::iterator end();
+    typename ObjectMap::iterator begin();
+    typename ObjectMap::iterator end();
 
-    void addBoundAsDependencyTo(UsedObject& obj);
+    void addBoundAsDependencyTo(UsedObject<T>& obj);
 
-    UsedObject::Pointer bind(unsigned bindpoint, unsigned id);
+    ObjectPtr bind(unsigned bindpoint, T id);
 
 protected:
-    void addObject(unsigned id, UsedObject::Pointer obj);
-    UsedObject::Pointer boundAtBinding(unsigned index);
+    void addObject(T id, ObjectPtr obj);
+    ObjectPtr boundAtBinding(unsigned index);
     void generate_internal(const trace::Call& call, int array_id);    
 private:
 
     virtual void emitBoundObjectsExt(CallSet& out_calls);
-    virtual UsedObject::Pointer bindTarget(unsigned id, unsigned bindpoint);
+    virtual ObjectPtr bindTarget(unsigned id, unsigned bindpoint);
     virtual unsigned getBindpointFromCall(const trace::Call& call) const = 0;
     virtual unsigned getBindpoint(unsigned target, unsigned index) const;
     virtual bool setTargetType(unsigned id, unsigned target);
@@ -125,17 +128,19 @@ private:
     std::vector<PTraceCall> m_calls;
 };
 
-class DependecyObjectWithSingleBindPointMap: public DependecyObjectMap {
+template <class T>
+class DependecyObjectWithSingleBindPointMap: public DependecyObjectMap<T> {
 private:
     unsigned getBindpointFromCall(const trace::Call& call) const override;
 };
 
-class DependecyObjectWithDefaultBindPointMap: public DependecyObjectMap {
+template <class T>
+class DependecyObjectWithDefaultBindPointMap: public DependecyObjectMap<T> {
 private:
     unsigned getBindpointFromCall(const trace::Call& call) const override;
 };
 
-class BufferObjectMap: public DependecyObjectMap {
+class BufferObjectMap: public DependecyObjectMap<unsigned> {
 public:
 
     enum BufTypes {
@@ -170,9 +175,9 @@ public:
 
     void namedData(const trace::Call& call);
 
-    UsedObject::Pointer boundToTarget(unsigned target);
+    ObjectPtr boundToTarget(unsigned target);
 
-    void addSSBODependencies(UsedObject::Pointer dep);
+    void addSSBODependencies(ObjectPtr dep);
 
     void copyBufferSubData(const trace::Call& call);
     void copyNamedBufferSubData(const trace::Call& call);
@@ -183,7 +188,7 @@ private:
     unsigned getBindpoint(unsigned target, unsigned index) const override;
 
     std::unordered_map<unsigned,
-        std::unordered_map<unsigned, UsedObject::Pointer>> m_mapped_buffers;
+        std::unordered_map<unsigned, ObjectPtr>> m_mapped_buffers;
 
     std::unordered_map<unsigned, unsigned> m_buffer_sizes;
     std::unordered_map<unsigned, std::pair<uint64_t, uint64_t>> m_buffer_mappings;
@@ -191,7 +196,7 @@ private:
 
 };
 
-class VertexAttribObjectMap: public DependecyObjectWithDefaultBindPointMap {
+class VertexAttribObjectMap: public DependecyObjectWithDefaultBindPointMap<unsigned> {
 public:
     VertexAttribObjectMap();
     void bindAVO(const trace::Call& call, BufferObjectMap& buffers);
@@ -201,15 +206,15 @@ private:
     unsigned next_id;
 };
 
-class TextureObjectMap: public DependecyObjectMap {
+class TextureObjectMap: public DependecyObjectMap<unsigned> {
 public:
     TextureObjectMap();
     void oglActiveTexture(const trace::Call& call);
-    UsedObject::Pointer oglBindMultitex(const trace::Call& call);
+    ObjectPtr oglBindMultitex(const trace::Call& call);
     void copy(const trace::Call& call);
     void bindToImageUnit(const trace::Call& call);
-    void bindFromTextureTarget(unsigned unit, UsedObject::Pointer obj);
-    void addImageDependencies(UsedObject::Pointer dep);
+    void bindFromTextureTarget(unsigned unit, ObjectPtr obj);
+    void addImageDependencies(ObjectPtr dep);
     void unbindUnits(unsigned first, unsigned count);
     void generateWithTarget(const trace::Call& call); 
 private:
@@ -218,10 +223,10 @@ private:
     bool setTargetType(unsigned id, unsigned target) override;
     int getBindpointFromTargetAndUnit(unsigned target, unsigned unit) const;
     unsigned m_active_texture;
-    std::unordered_map<unsigned, UsedObject::Pointer> m_bound_images;
+    std::unordered_map<unsigned, ObjectPtr> m_bound_images;
 };
 
-class QueryObjectMap: public DependecyObjectMap {
+class QueryObjectMap: public DependecyObjectMap<unsigned> {
 public:
     enum QueryType {
         query_samples_passed,
@@ -246,7 +251,7 @@ private:
     void endWithTargetIndex(unsigned target, unsigned index, const trace::Call &call);
 };
 
-class FramebufferObjectMap: public DependecyObjectMap {
+class FramebufferObjectMap: public DependecyObjectMap<unsigned> {
 public:
     FramebufferObjectMap();
     void oglBlit(const trace::Call& call);
@@ -254,7 +259,7 @@ public:
     void oglReadBuffer(const trace::Call& call);
     void oglDrawFromBuffer(const trace::Call& call, BufferObjectMap &buffers);
 private:
-    UsedObject::Pointer
+    ObjectPtr
     bindTarget(unsigned id, unsigned bindpoint) override;
     unsigned getBindpointFromCall(const trace::Call& call) const override;
 };
@@ -262,7 +267,7 @@ private:
 struct GlobalState {
     CallSet *out_list = nullptr;
     bool emit_dependencies = false;
-    UsedObject::Pointer current_vao;
+    UsedObject<unsigned>::Pointer current_vao;
 };
 
 extern GlobalState global_state;

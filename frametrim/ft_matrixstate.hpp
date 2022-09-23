@@ -32,7 +32,7 @@
 
 namespace frametrim {
 
-class MatrixState : public UsedObject
+class MatrixState : public UsedObject<unsigned>
 {
 public:
     using Pointer = std::shared_ptr<MatrixState>;
