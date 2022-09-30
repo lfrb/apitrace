@@ -74,7 +74,11 @@ TraceCall::TraceCall(const trace::Call& call, const std::string& name):
 
     trace::StreamVisitor sv(s);
     for(auto&& a: call.args) {
-        s << "_";  a.value->visit(sv);
+        s << "_";
+        if (a.value)
+            a.value->visit(sv);
+        else
+            s << "?";
     }
 
     m_name_with_params = s.str();

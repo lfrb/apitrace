@@ -26,6 +26,7 @@
  *********************************************************************/
 
 #include "ft_frametrimmer.hpp"
+#include "ft_opengl.hpp"
 
 #include "os_time.hpp"
 #include "trace_parser.hpp"
@@ -130,7 +131,7 @@ static int trim_to_frame(const char *filename,
         out_filename = std::string(base.str()) + std::string("-trim.trace");
     }
 
-    FrameTrimmer trimmer(options.keep_all_states);
+    OpenGLImpl trimmer(options.keep_all_states);
 
     frame = 0;
     uint64_t callid = 0;
