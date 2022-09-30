@@ -26,8 +26,12 @@
  *********************************************************************/
 
 #include "ft_frametrimmer.hpp"
+#include "ft_d3d11.hpp"
+#include "ft_opengl.hpp"
 
 #include "trace_model.hpp"
+
+#include <algorithm>
 
 namespace frametrim {
 
@@ -36,6 +40,20 @@ FrameTrimmer::FrameTrimmer(bool keep_all_states):
     m_recording_frame(false),
     m_last_frame_start(0)
 {
+}
+
+std::unique_ptr<FrameTrimmer>
+FrameTrimmer::create(trace::API api, bool keep_all_states)
+{
+    if (api == trace::API_GL || api == trace::API_EGL) {
+        std::cerr << "OpenGL trimmer\n";
+        return std::unique_ptr<FrameTrimmer>(new OpenGLImpl(keep_all_states));
+    } else if (api == trace::API_DXGI || api == trace::API_UNKNOWN) {
+        std::cerr << "D3D11 trimmer\n";
+        return std::unique_ptr<FrameTrimmer>(new D3D11Impl(keep_all_states));
+    } else {
+        assert(0);
+    }
 }
 
 void FrameTrimmer::start_last_frame(uint32_t callno)
@@ -89,10 +107,10 @@ FrameTrimmer::call(const trace::Call& call, Frametype frametype)
             }
 
             if (max_equal) {
+                //if (strcmp(call.name(), cb->first))
+                //    std::cerr << "Handle " << call.name() << " as " << cb->first << "\n";
                 cb->second(call);
                 m_call_table_cache[call.name()] = cb->second;
-                if (strcmp(call.name(), cb->first))
-                    std::cerr << "Handle " << call.name() << " as " << cb->first << "\n";
             } else {
                 if (m_unhandled_calls.find(call_name) == m_unhandled_calls.end()) {
                     std::cerr << "Call " << call.no
@@ -163,6 +181,14 @@ unsigned
 FrameTrimmer::equalChars(const char *prefix, const char *callname)
 {
     unsigned retval = 0;
+
+    const char *prefix_del = strstr(prefix, "::");
+    const char *callname_del = strstr(callname, "::");
+    if (prefix_del && callname_del) {
+        prefix = prefix_del;
+        callname = callname_del;
+    }
+
     while (*prefix && *callname && *prefix == *callname) {
         ++retval;
         ++prefix; ++callname;

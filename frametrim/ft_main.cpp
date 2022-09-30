@@ -26,7 +26,6 @@
  *********************************************************************/
 
 #include "ft_frametrimmer.hpp"
-#include "ft_opengl.hpp"
 
 #include "os_time.hpp"
 #include "trace_parser.hpp"
@@ -131,7 +130,7 @@ static int trim_to_frame(const char *filename,
         out_filename = std::string(base.str()) + std::string("-trim.trace");
     }
 
-    OpenGLImpl trimmer(options.keep_all_states);
+    auto trimmer = FrameTrimmer::create(p.api, options.keep_all_states);
 
     frame = 0;
     uint64_t callid = 0;
@@ -158,11 +157,11 @@ static int trim_to_frame(const char *filename,
             ft = ft_retain_frame;
             if (!start_last_frame && frame == options.frames.getLast()) {
                 start_last_frame = true;
-                trimmer.start_last_frame(call->no);
+                trimmer->start_last_frame(call->no);
             }
         }
 
-        trimmer.call(*call, ft);
+        trimmer->call(*call, ft);
 
         if (call->flags & trace::CALL_FLAG_END_FRAME) {
             if (options.top_frame_call_counts > 0) {
@@ -183,7 +182,7 @@ static int trim_to_frame(const char *filename,
         call.reset(p.parse_call());
         ++calls_in_this_frame;
     }
-    trimmer.finalize();
+    trimmer->finalize();
     std::cerr << "\nDone scanning frames\n";
 
     trace::Writer writer;
@@ -192,7 +191,7 @@ static int trim_to_frame(const char *filename,
         return 2;
     }
 
-    auto call_ids = trimmer.getUniqueCallIds();
+    auto call_ids = trimmer->getUniqueCallIds();
     std::cerr << "Write output file\n";
 
     p.close();

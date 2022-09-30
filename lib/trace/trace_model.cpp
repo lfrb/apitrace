@@ -26,6 +26,7 @@
 
 #include <string.h>
 #include <deque>
+#include <iostream>
 
 #include "trace_model.hpp"
 
@@ -47,6 +48,17 @@ Call::~Call() {
 Value &
 Call::argByName(const char *argName) {
     for (unsigned i = 0; i < sig->num_args; ++i) {
+        if (strcmp(sig->arg_names[i], argName) == 0) {
+            return arg(i);
+        }
+    }
+    return null;
+}
+
+const Value &
+Call::argByName(const char *argName) const {
+    for (unsigned i = 0; i < sig->num_args; ++i) {
+        std::cout << "arg " << i << " is " << sig->arg_names[i] << "\n";
         if (strcmp(sig->arg_names[i], argName) == 0) {
             return arg(i);
         }

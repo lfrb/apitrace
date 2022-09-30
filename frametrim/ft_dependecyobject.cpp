@@ -37,7 +37,8 @@ namespace frametrim {
 template <class T>
 UsedObject<T>::UsedObject(T id):
     m_id(id),
-    m_emitted(true)
+    m_emitted(true),
+    m_emitting(false)
 {
 
 }
@@ -91,14 +92,18 @@ template <class T>
 void
 UsedObject<T>::emitCallsTo(CallSet& out_list)
 {
-    if (!m_emitted) {
-        m_emitted = true;
+    if (m_emitting)
+        return;
+
+    m_emitting = true;
+    m_emitted = true;
         for (auto&& n : m_calls)
             out_list.insert(n);
+        m_calls.clear();
 
         for (auto&& o : m_dependencies)
             o->emitCallsTo(out_list);
-    }
+    m_emitting = false;
 }
 
 template <class T>
@@ -129,10 +134,19 @@ bool UsedObject<T>::createdBefore(unsigned callno) const
     return callno > 0 && m_calls[0]->callNo() < callno;
 }
 
-unsigned
-toKey(const trace::Value *v)
+template<typename T>
+T toKey(const trace::Value *v);
+
+template <>
+unsigned toKey<unsigned>(const trace::Value *v)
 {
     return v->toUInt();
+}
+
+template <>
+void * toKey<void *>(const trace::Value *v)
+{
+    return v->toPointer();
 }
 
 template <class T>
@@ -143,8 +157,8 @@ DependecyObjectMap<T>::generate_internal(const trace::Call& call, int array_id)
     const auto ids = (call.arg(array_id)).toArray();
     std::vector<ObjectPtr> created_objs;
     for (auto& v : ids->values) {
-        auto old_obj = getById(toKey(v));
-        auto obj = old_obj ? old_obj : std::make_shared<UsedObject<T> >(toKey(v));
+        auto old_obj = getById(toKey<T>(v));
+        auto obj = old_obj ? old_obj : std::make_shared<UsedObject<T> >(toKey<T>(v));
         obj->addCall(c);
         obj->setExtraInfo("valid", 1);
         if (old_obj) {
@@ -152,7 +166,7 @@ DependecyObjectMap<T>::generate_internal(const trace::Call& call, int array_id)
         } else {
             obj->setExtraInfo("create_call", call.no);
         }
-        addObject(toKey(v), obj);
+        addObject(toKey<T>(v), obj);
 
         // make all objects that are created together depend on each other
         for (auto& o : created_objs) {
@@ -177,7 +191,8 @@ void DependecyObjectMap<T>::destroy(const trace::Call& call)
     const auto ids = (call.arg(1)).toArray();
     assert(ids);
     for (auto& v : ids->values) {
-        auto obj_it = m_objects.find(toKey(v));
+        auto obj_id = toKey<T>(v);
+        auto obj_it = m_objects.find(obj_id);
         if (obj_it != m_objects.end()) {
             assert(obj_it->second->id() == obj_id);
             obj_it->second->addCall(c);
@@ -200,7 +215,7 @@ void DependecyObjectMap<T>::destroy(const trace::Call& call)
 template <class T>
 void DependecyObjectMap<T>::create(const trace::Call& call)
 {
-    auto key = toKey(call.ret);
+    auto key = toKey<T>(call.ret);
     auto obj = std::make_shared<UsedObject<T>>(key);
     addObject(key, obj);
     auto c = trace2call(call);
@@ -211,7 +226,7 @@ void DependecyObjectMap<T>::create(const trace::Call& call)
 template <class T>
 void DependecyObjectMap<T>::del(const trace::Call& call)
 {
-    auto obj_it = m_objects.find(toKey(&call.arg(0)));
+    auto obj_it = m_objects.find(toKey<T>(&call.arg(0)));
     if (obj_it != m_objects.end()) {
         obj_it->second->addCall(trace2call(call));
         obj_it->second->setExtraInfo("valid", 0);
@@ -228,7 +243,7 @@ template <class T>
 typename DependecyObjectMap<T>::ObjectPtr
 DependecyObjectMap<T>::bind(const trace::Call& call, unsigned obj_id_param)
 {
-    unsigned id = call.arg(obj_id_param).toUInt();
+    T id = toKey<T>(&call.arg(obj_id_param));
     if (!setTargetType(id, call.arg(0).toUInt()))  {
         std::cerr << "Texture target type mismatch in call " << call.no << "\n";
         assert(0);
@@ -258,7 +273,7 @@ DependecyObjectMap<T>::bind(const trace::Call& call, unsigned obj_id_param)
 }
 
 template <class T>
-bool DependecyObjectMap<T>::setTargetType(unsigned id, unsigned target)
+bool DependecyObjectMap<T>::setTargetType(T id, unsigned target)
 {
     (void)id;
     (void)target;
@@ -267,7 +282,7 @@ bool DependecyObjectMap<T>::setTargetType(unsigned id, unsigned target)
 
 template <class T>
 typename DependecyObjectMap<T>::ObjectPtr
-DependecyObjectMap<T>::bindTarget(unsigned id, unsigned bindpoint)
+DependecyObjectMap<T>::bindTarget(T id, unsigned bindpoint)
 {
     if (id) {
         m_bound_object[bindpoint] = m_objects[id];
@@ -279,7 +294,7 @@ DependecyObjectMap<T>::bindTarget(unsigned id, unsigned bindpoint)
 
 template <class T>
 typename DependecyObjectMap<T>::ObjectPtr
-DependecyObjectMap<T>::bind( unsigned bindpoint, T id)
+DependecyObjectMap<T>::bind(unsigned bindpoint, T id)
 {
     return m_bound_object[bindpoint] = m_objects[id];
 }
@@ -293,14 +308,14 @@ DependecyObjectMap<T>::boundTo(unsigned target, unsigned index)
 }
 
 template <class T>
-typename DependecyObjectMap<T>::ObjectMap::iterator
+typename DependecyObjectMap<T>::ObjectBinding::iterator
 DependecyObjectMap<T>::begin()
 {
     return m_bound_object.begin();
 }
 
 template <class T>
-typename DependecyObjectMap<T>::ObjectMap::iterator
+typename DependecyObjectMap<T>::ObjectBinding::iterator
 DependecyObjectMap<T>::end()
 {
     return m_bound_object.end();
@@ -342,7 +357,7 @@ typename DependecyObjectMap<T>::ObjectPtr
 DependecyObjectMap<T>::bindWithCreate(const trace::Call& call, unsigned obj_id_param)
 {
     unsigned bindpoint = getBindpointFromCall(call);
-    unsigned id = call.arg(obj_id_param).toUInt();
+    auto id = toKey<T>(&call.arg(obj_id_param));
     if (!m_objects[id])  {
         m_objects[id] = std::make_shared<UsedObject<T>>(id);
     }
@@ -366,8 +381,9 @@ DependecyObjectMap<T>::callOnNamedObject(const trace::Call& call)
 {
     auto obj = m_objects[call.arg(0).toUInt()];
     if (!obj) {
-        if (call.arg(0).toUInt()) {
-            std::cerr << "Named object " << call.arg(0).toUInt()
+        auto id = toKey<T>(&call.arg(0));
+        if (id) {
+            std::cerr << "Named object " << id
                       << " doesn't exists in call " << call.no << ": "
                       << call.name() << " ... ignoring\n";
             return;
@@ -383,7 +399,7 @@ DependecyObjectMap<T>::callOnBoundObjectWithDep(const trace::Call& call,
                                                 int dep_obj_param,
                                                 bool reverse_dep_too)
 {
-    unsigned obj_id = call.arg(dep_obj_param).toUInt();
+    T obj_id = toKey<T>(&call.arg(dep_obj_param));
     unsigned bindpoint = getBindpointFromCall(call);
     if (!m_bound_object[bindpoint]) {
         if (obj_id)
@@ -433,20 +449,21 @@ DependecyObjectMap<T>::callOnNamedObjectWithDep(const trace::Call& call,
                                                 int dep_obj_param,
                                                 bool reverse_dep_too)
 {
-    auto obj = m_objects[call.arg(0).toUInt()];
+    T obj_id = toKey<T>(&call.arg(0));
+    auto obj = m_objects[obj_id];
 
     if (!obj) {
-        if (!call.arg(0).toUInt())
+        if (!obj_id)
             return;
 
         std::cerr << "Call:" << call.no << ":" << call.name()
-                  << " Object " << call.arg(0).toUInt() << "not found\n";
+                  << " Object " << obj_id << "not found\n";
         assert(0);
     }
 
 
 
-    unsigned dep_obj_id = call.arg(dep_obj_param).toUInt();
+    unsigned dep_obj_id = toKey<T>(&call.arg(dep_obj_param));
     if (dep_obj_id) {
         auto dep_obj = other_objects.getById(dep_obj_id);
         assert(dep_obj);
@@ -560,6 +577,7 @@ DependecyObjectWithDefaultBindPointMap<T>::getBindpointFromCall(const trace::Cal
 }
 
 template class UsedObject<unsigned>;
+template class UsedObject<void *>;
 template class DependecyObjectMap<unsigned>;
 template class DependecyObjectWithSingleBindPointMap<unsigned>;
 template class DependecyObjectWithDefaultBindPointMap<unsigned>;

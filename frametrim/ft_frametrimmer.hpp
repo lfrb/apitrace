@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "trace_api.hpp"
 #include "trace_parser.hpp"
 #include "ft_tracecall.hpp"
 
@@ -42,6 +43,20 @@ using ft_callback = std::function<void(const trace::Call&)>;
 struct string_part_less {
     bool operator () (const char *lhs, const char *rhs) const
     {
+        const char *ldel = strstr(lhs, "::");
+        const char *rdel = strstr(rhs, "::");
+
+        if (ldel && rdel) {
+            int len = std::min(ldel - lhs, rdel - rhs);
+            int cmp = strncmp(lhs, rhs, len);
+            if (len != 0 && cmp != 0)
+                return cmp < 0;
+            lhs = ldel;
+            rhs = rdel;
+        } else if (ldel || rdel) {
+            return ldel == NULL;
+        }
+
         int len = std::min(strlen(lhs), strlen(rhs));
         return strncmp(lhs, rhs, len) < 0;
     }
@@ -57,6 +72,7 @@ class FrameTrimmer
 {
 public:
     FrameTrimmer(bool keep_all_states);
+    static std::unique_ptr<FrameTrimmer> create(trace::API api, bool keep_all_states);
 
     void start_last_frame(uint32_t callno);
     void call(const trace::Call& call, Frametype target_frame_type);

@@ -63,8 +63,6 @@ public:
     OpenGLImpl(bool keep_all_states);
 
 protected:
-    void startTargetFrame();
-    void endTargetFrame();
     void emitState();
     bool skipDeleteObj(const trace::Call& call);
 

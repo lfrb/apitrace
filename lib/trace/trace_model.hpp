@@ -594,6 +594,9 @@ public:
 
     Value &
     argByName(const char *argName);
+
+    const Value &
+    argByName(const char *argName) const;
 };
 
 

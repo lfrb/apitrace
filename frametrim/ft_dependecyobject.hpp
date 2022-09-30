@@ -61,6 +61,7 @@ private:
     std::vector<Pointer> m_dependencies;
     T m_id;
     bool m_emitted;
+    bool m_emitting;
     std::unordered_map<std::string, unsigned> m_extra_info;
 };
 
@@ -69,6 +70,7 @@ class DependecyObjectMap {
 public:
     using ObjectPtr=typename UsedObject<T>::Pointer;
     using ObjectMap=std::unordered_map<T, ObjectPtr>;
+    using ObjectBinding=std::unordered_map<unsigned, ObjectPtr>;
 
     void generate(const trace::Call& call);
     void destroy(const trace::Call& call);
@@ -103,8 +105,8 @@ public:
     void emitBoundObjects(CallSet& out_calls);
     ObjectPtr boundTo(unsigned target, unsigned index = 0);
 
-    typename ObjectMap::iterator begin();
-    typename ObjectMap::iterator end();
+    typename ObjectBinding::iterator begin();
+    typename ObjectBinding::iterator end();
 
     void addBoundAsDependencyTo(UsedObject<T>& obj);
 
@@ -117,13 +119,13 @@ protected:
 private:
 
     virtual void emitBoundObjectsExt(CallSet& out_calls);
-    virtual ObjectPtr bindTarget(unsigned id, unsigned bindpoint);
+    virtual ObjectPtr bindTarget(T id, unsigned bindpoint);
     virtual unsigned getBindpointFromCall(const trace::Call& call) const = 0;
     virtual unsigned getBindpoint(unsigned target, unsigned index) const;
-    virtual bool setTargetType(unsigned id, unsigned target);
+    virtual bool setTargetType(T id, unsigned target);
 
     ObjectMap m_objects;
-    ObjectMap m_bound_object;
+    ObjectBinding m_bound_object;
 
     std::vector<PTraceCall> m_calls;
 };

@@ -14,6 +14,7 @@ include_directories (
 
 add_executable(gltrim
    ft_dependecyobject.cpp
+   ft_d3d11.cpp
    ft_frametrimmer.cpp
    ft_main.cpp
    ft_matrixstate.cpp
