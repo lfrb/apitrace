@@ -597,6 +597,9 @@ public:
 
     const Value &
     argByName(const char *argName) const;
+
+    unsigned
+    findArg(const char *argName) const;
 };
 
 

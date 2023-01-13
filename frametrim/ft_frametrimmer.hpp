@@ -43,20 +43,6 @@ using ft_callback = std::function<void(const trace::Call&)>;
 struct string_part_less {
     bool operator () (const char *lhs, const char *rhs) const
     {
-        const char *ldel = strstr(lhs, "::");
-        const char *rdel = strstr(rhs, "::");
-
-        if (ldel && rdel) {
-            int len = std::min(ldel - lhs, rdel - rhs);
-            int cmp = strncmp(lhs, rhs, len);
-            if (len != 0 && cmp != 0)
-                return cmp < 0;
-            lhs = ldel;
-            rhs = rdel;
-        } else if (ldel || rdel) {
-            return ldel == NULL;
-        }
-
         int len = std::min(strlen(lhs), strlen(rhs));
         return strncmp(lhs, rhs, len) < 0;
     }
@@ -72,7 +58,7 @@ class FrameTrimmer
 {
 public:
     FrameTrimmer(bool keep_all_states);
-    static std::unique_ptr<FrameTrimmer> create(trace::API api, bool keep_all_states);
+    static std::shared_ptr<FrameTrimmer> create(trace::API api, bool keep_all_states);
 
     void start_last_frame(uint32_t callno);
     void call(const trace::Call& call, Frametype target_frame_type);
@@ -83,11 +69,9 @@ public:
     std::unordered_set<unsigned> getUniqueCallIds();
 
 protected:
+    virtual ft_callback findCallback(const char *name) = 0;
     virtual void emitState() = 0;
     virtual bool skipDeleteObj(const trace::Call& call) = 0;
-
-    using CallTable = std::multimap<const char *, ft_callback, string_part_less>;
-    CallTable m_call_table;
 
     using CallTableCache =  std::map<const char *, ft_callback>;
     CallTableCache m_call_table_cache;
@@ -99,8 +83,6 @@ protected:
     CallSet m_required_calls;
 
     std::set<std::string> m_unhandled_calls;
-
-    unsigned equalChars(const char *prefix, const char *callname);
 };
 
 }

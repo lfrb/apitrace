@@ -46,330 +46,6 @@ using std::bind;
 using std::placeholders::_1;
 using std::make_shared;
 
-DXGIObject::DXGIObject(void *id):
-    UsedObject<void *>(id)
-{
-}
-
-DXGISwapChain::DXGISwapChain(void *id, unsigned width, unsigned height):
-    DXGIObject(id),
-    m_width(width),
-    m_height(height)
-{
-}
-
-void
-DXGISwapChain::resizeBuffers(unsigned width, unsigned height)
-{
-    m_width = width;
-    m_height = height;
-}
-
-unsigned
-DXGISwapChain::getHeight() const
-{
-    return m_height;
-}
-
-D3D11DeviceChild::D3D11DeviceChild(void *id):
-    UsedObject<void *>(id)
-{
-}
-
-D3D11Resource::D3D11Resource(void *id, eResourceType kind, unsigned size):
-    D3D11DeviceChild(id),
-    m_kind(kind),
-    m_size(size)
-{
-}
-
-unsigned
-D3D11Resource::getMappedSize(unsigned width_stride, unsigned depth_stride)
-{
-    switch (m_kind) {
-    case rt_buffer: return m_size;
-    case rt_texture_1d: return width_stride;
-    case rt_texture_2d: return m_height * width_stride;
-    case rt_texture_3d: return m_depth * depth_stride;
-    default: assert(0);
-    }
-}
-
-D3D11View::D3D11View(void *id, D3D11Resource::Pointer res):
-    D3D11DeviceChild(id),
-    m_resource(res)
-{
-}
-
-D3D11Context::D3D11Context(void *id, std::shared_ptr<D3D11Device> device):
-    D3D11DeviceChild(id),
-    m_device(device)
-{
-}
-
-
-
-ObjectBindings&
-D3D11Context::getBindingsOfType(ePerContextBinding binding_type)
-{
-    switch (binding_type) {
-    case pcb_shaders: return m_shaders;
-    case pcb_samplers: return m_samplers;
-    case pcb_input_layout: return m_input_layout;
-    case pcb_vertex_buffers: return m_vertex_buffers;
-    case pcb_index_buffer: return m_index_buffer;
-    case pcb_constant_buffers: return m_constant_buffers;
-    case pcb_shader_resources: return m_shader_resources;
-    case pcb_render_targets: return m_render_targets;
-    case pcb_depth_stencil_view: return m_depth_stencil_view;
-    case pcb_unordered_access_views: return m_unordered_access_views;
-    case pcb_stream_out_targets: return m_stream_out_targets;
-    default: assert(0);
-    }
-}
-
-D3D11Device::D3D11Device(void *id):
-    UsedObject<void *>(id)
-{
-}
-
-D3D11Impl::D3D11Impl(bool keep_all_states):
-    FrameTrimmer(keep_all_states)
-{
-    registerDeviceCalls();
-    registerContextCalls();
-}
-
-void D3D11Impl::emitState()
-{
-}
-
-// Map callbacks to call methods of FrameTrimImpl
-// Additional data is passed by reference (R) or by value (V)
-
-#define MAP(name, call) m_call_table.insert(std::make_pair(#name, bind(&D3D11Impl:: call, this, _1)))
-
-#define MAP_V(name, call, ...) \
-    m_call_table.insert(std::make_pair(#name, bind(&D3D11Impl:: call, this, _1, ## __VA_ARGS__)))
-
-#define MAP_FACTORY(name, call) \
-    m_call_table.insert(std::make_pair("IDXGIFactory1::" #name, bind(&D3D11Impl:: call, this, _1))) \
-
-#define MAP_DEV(name, call) \
-    m_call_table.insert(std::make_pair("ID3D11Device::" #name, bind(&D3D11Impl:: call, this, _1)))
-
-#define MAP_DEV_V(name, call, ...) \
-    m_call_table.insert(std::make_pair("ID3D11Device::" #name, bind(&D3D11Impl:: call, this, _1, \
-                                                                    ## __VA_ARGS__)))
-
-#if 0
-
-void D3D11Impl::registerIgnoredCalls()
-{
-/*
-    "*::GetDesc",
-    "*::GetDesc1"
-*/
-}
-
-#endif
-
-
-void D3D11Impl::registerDeviceCalls()
-{
-    MAP_V(IDXGIAdapter::Release, releaseDXGIObject);
-    MAP_V(IDXGIFactory::Release, releaseDXGIObject);
-    MAP_V(IDXGIOutput::Release, releaseDXGIObject);
-    MAP_V(ID3D11Device::Release, releaseDevice);
-    MAP_V(ID3D11Buffer::Release,releaseDeviceChild);
-    MAP_V(ID3D11Texture1D::Release,releaseDeviceChild);
-    MAP_V(ID3D11Texture2D::Release,releaseDeviceChild);
-    MAP_V(ID3D11Texture3D::Release,releaseDeviceChild);
-    MAP_V(ID3D11DomainShader::Release,releaseDeviceChild);
-    MAP_V(ID3D11FragmentShader::Release,releaseDeviceChild);
-    MAP_V(ID3D11GeometryShader::Release,releaseDeviceChild);
-    MAP_V(ID3D11HullShader::Release,releaseDeviceChild);
-    MAP_V(ID3D11HullShader::Release,releaseDeviceChild);
-    MAP_V(ID3D11PixelShader::Release,releaseDeviceChild);
-
-    MAP(CreateDXGIFactory, createDXGIFactory);
-    MAP(D3D11CreateDevice, createDevice);
-    MAP(D3D11CreateDeviceAndSwapChain, createDevice);
-    MAP(IDXGIFactory::CreateSwapChainForHwnd, createSwapChain);
-    MAP(IDXGIFactory::EnumAdapters, enumAdapters);
-    MAP(IDXGISwapChain::ResizeBuffers, resizeBuffers);
-    MAP(IDXGISwapChain::ResizeTarget, resizeTarget);
-    MAP(IDXGISwapChain::GetBuffer, getBuffer);
-    MAP_DEV(GetImmediateContext, getImmediateContext);
-    MAP_DEV(GetImmediateContext1, getImmediateContext);
-
-    MAP_DEV(CreateBlendState, createState);
-    MAP_DEV(CreateDepthStencilState, createState);
-    MAP_DEV(CreateRasterizerState, createState);
-    MAP_DEV(CreateSamplerState, createState);
-
-    MAP_DEV_V(CreateClassLinkage, create, pd_class_linkages, 1);
-    MAP_DEV_V(CreateInputLayout, create, pd_input_layouts, 5);
-
-    MAP_DEV(CreateVertexShader, createShader);
-    MAP_DEV(CreateHullShader, createShader);
-    MAP_DEV(CreateDomainShader, createShader);
-    MAP_DEV(CreateGeometryShader, createShader);
-    MAP_DEV(CreateGeometryShaderWithStreamOutput, createShaderWithStreamOutput);
-    MAP_DEV(CreatePixelShader, createShader);
-    MAP_DEV(CreateComputeShader, createShader);
-
-    MAP_DEV(CreateBuffer, createBuffer);
-    MAP_DEV(CreateTexture1D, createTexture1D);
-    MAP_DEV(CreateTexture2D, createTexture2D);
-    MAP_DEV(CreateTexture3D, createTexture3D);
-
-    MAP_DEV(CreateShaderResourceView, createView);
-    MAP_DEV(CreateUnorderedAccessView, createView);
-    MAP_DEV(CreateRenderTargetView, createView);
-    MAP_DEV(CreateDepthStencilView, createView);
-
-    MAP_DEV(CreateQuery, createAsync);
-    MAP_DEV(CreateCounter, createAsync);
-    MAP_DEV(CreatePredicate, createAsync);
-}
-
-#define MAP_CTX(name, call) \
-    m_call_table.insert(std::make_pair("ID3D11DeviceContext::" #name, bind(&D3D11Impl:: call, this, _1)))
-
-#define MAP_CTX_V(name, call, ...) \
-    m_call_table.insert(std::make_pair("ID3D11DeviceContext::" #name, bind(&D3D11Impl:: call, this, _1, ## __VA_ARGS__)))
-
-void
-D3D11Impl::registerContextCalls()
-{
-    MAP_CTX(ClearState, clearState);
-    //TODO MAP_CTX(Flush, addCall);
-
-    MAP_CTX_V(IASetIndexBuffer, bindSlot, pcb_index_buffer, 1);
-    MAP_CTX_V(IASetVertexBuffers, bindSlots, pcb_vertex_buffers, ss_vertex);
-    MAP_CTX_V(IASetInputLayout, bindSlot, pcb_input_layout, 1);
-    MAP_CTX_V(IASetPrimitiveTopology, setState, pc_primitive_topology);
-
-    MAP_CTX_V(OMSetBlendState, bindState, pc_blend);
-    MAP_CTX_V(OMSetDepthStencilState, bindState, pc_depth_stencil);
-    MAP_CTX(OMSetRenderTargets, bindRenderTargets);
-    MAP_CTX(OMSetRenderTargetsAndUnorderedAccessViews, bindRenderTargetsAndUAVS);
-
-    MAP_CTX_V(RSSetViewports, setState, pc_viewport);
-    MAP_CTX_V(RSSetScissorRects, setState, pc_scissor);
-    MAP_CTX_V(RSSetState, bindState, pc_rasterizer);
-
-    MAP_CTX_V(SOSetTargets, bindObjects, pcb_stream_out_targets, 0, 0, 2);
-
-    MAP_CTX_V(VSSetShader, bindShader, ss_vertex);
-    MAP_CTX_V(HSSetShader, bindShader, ss_hull);
-    MAP_CTX_V(DSSetShader, bindShader, ss_domain);
-    MAP_CTX_V(GSSetShader, bindShader, ss_geometry);
-    MAP_CTX_V(PSSetShader, bindShader, ss_pixel);
-    MAP_CTX_V(CSSetShader, bindShader, ss_compute);
-
-    MAP_CTX_V(VSSetSamplers, bindSlots, pcb_samplers, ss_vertex);
-    MAP_CTX_V(HSSetSamplers, bindSlots, pcb_samplers, ss_hull);
-    MAP_CTX_V(DSSetSamplers, bindSlots, pcb_samplers, ss_domain);
-    MAP_CTX_V(GSSetSamplers, bindSlots, pcb_samplers, ss_geometry);
-    MAP_CTX_V(PSSetSamplers, bindSlots, pcb_samplers, ss_pixel);
-    MAP_CTX_V(CSSetSamplers, bindSlots, pcb_samplers, ss_compute);
-
-    MAP_CTX_V(VSSetShaderResources, bindSlots, pcb_shader_resources, ss_vertex);
-    MAP_CTX_V(HSSetShaderResources, bindSlots, pcb_shader_resources, ss_hull);
-    MAP_CTX_V(DSSetShaderResources, bindSlots, pcb_shader_resources, ss_domain);
-    MAP_CTX_V(GSSetShaderResources, bindSlots, pcb_shader_resources, ss_geometry);
-    MAP_CTX_V(PSSetShaderResources, bindSlots, pcb_shader_resources, ss_pixel);
-    MAP_CTX_V(CSSetShaderResources, bindSlots, pcb_shader_resources, ss_compute);
-
-    MAP_CTX_V(VSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_vertex);
-    MAP_CTX_V(HSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_hull);
-    MAP_CTX_V(DSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_domain);
-    MAP_CTX_V(GSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_geometry);
-    MAP_CTX_V(PSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_pixel);
-    MAP_CTX_V(CSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_compute);
-
-    MAP_CTX(ClearView, clearView);
-    MAP_CTX(ClearRenderTargetView, clearView);
-    MAP_CTX(ClearDepthStencilView, clearView);
-    MAP_CTX(ClearUnorderedAccessViewFloat, clearView);
-    MAP_CTX(ClearUnorderedAccessViewUint, clearView);
-
-    MAP(memcpy, memcopy);
-    MAP_CTX(Map, map);
-    MAP_CTX(Unmap, unmap);
-    MAP_CTX_V(UpdateResource, callOnObject, pd_resources, 1);
-    MAP_CTX_V(UpdateSubresource, callOnObject, pd_resources, 1);
-    MAP_CTX_V(CopyResources, copyResource, 1, 2);
-    MAP_CTX_V(CopyStructureCount, copyResource, 1, 3);
-    MAP_CTX_V(CopySubresourceRegion, copyResource, 1, 6);
-    MAP_CTX_V(GenerateMips, callOnObject, pd_views, 1);
-
-#if 0
-    MAP_CTX(SetPredication);
-    MAP_CTX(Begin); // query, predicate and counter
-    MAP_CTX(End);
-    MAP_CTX(GetData);
-#endif
-
-    MAP_CTX(Draw, draw);
-    MAP_CTX(DrawAuto, draw);
-    MAP_CTX(DrawIndexed, draw);
-    MAP_CTX(DrawIndexedInstanced, draw);
-    MAP_CTX(DrawIndexedInstancedIndirect, draw); // XXX buffer binding
-    MAP_CTX(DrawInstanced, draw);
-    MAP_CTX(DrawInstancedIndirect, draw); // XXX buffer binding
-}
-
-bool D3D11Impl::skipDeleteObj(const trace::Call& call)
-{
-    return false;
-}
-
-#define IS_INTERFACE(call, interface) (strncmp(call.name(), #interface, strlen(#interface)) == 0)
-
-void D3D11Impl::release(const trace::Call& call, eObjectType kind)
-{
-    if (call.ret->toUInt() != 0)
-        return;
-
-    auto id = call.arg(0).toPointer();
-    //std::cout << "release " << id << " ret = " << call.ret->toUInt() << "\n";
-    if (IS_INTERFACE(call, "IDXGIAdapter"))
-        std::cout << "release adapter " << id << "\n";
-}
-
-void D3D11Impl::releaseDXGIObject(const trace::Call& call)
-{
-    if (call.ret->toUInt() != 0)
-        return;
-
-    auto id = call.arg(0).toPointer();
-    //std::cout << "release " << id << " ret = " << call.ret->toUInt() << "\n";
-    m_dxgi_objects.erase(id);
-}
-
-void D3D11Impl::releaseDevice(const trace::Call& call)
-{
-    if (call.ret->toUInt() != 0)
-        return;
-
-    auto id = call.arg(0).toPointer();
-    //std::cout << "release " << id << " ret = " << call.ret->toUInt() << "\n";
-    m_devices.erase(id);
-}
-
-void D3D11Impl::releaseDeviceChild(const trace::Call& call)
-{
-    if (call.ret->toUInt() != 0)
-        return;
-
-    auto id = call.arg(0).toPointer();
-    //std::cout << "release " << id << " ret = " << call.ret->toUInt() << "\n";
-    m_children.erase(id);
-}
-
 static void *
 unwrapObj(const trace::Call& call, const char *name)
 {
@@ -384,161 +60,926 @@ unwrapObjAt(const trace::Call& call, unsigned index)
     return array->values[0]->toPointer();
 }
 
-void D3D11Impl::createDXGIFactory(const trace::Call& call)
+static D3D11Box *
+toBox(const trace::Call& call, unsigned index)
 {
-    auto id = unwrapObj(call, "ppFactory");
-    m_dxgi_objects[id] = std::make_shared<DXGIObject>(id);
-    m_dxgi_objects[id]->addCall(trace2call(call));
+    auto array = call.arg(index).toArray();
+    if (!array)
+        return nullptr;
+
+    auto box = array->values[0]->toStruct();
+    auto left = box->members[0]->toUInt();
+    auto top = box->members[1]->toUInt();
+    auto front = box->members[2]->toUInt();
+    auto right = box->members[3]->toUInt();
+    auto bottom = box->members[4]->toUInt();
+    auto back = box->members[5]->toUInt();
+
+    return new D3D11Box(left, top, front, right, bottom, back);
 }
 
-void D3D11Impl::createDevice(const trace::Call& call)
+D3D11Box::D3D11Box(unsigned left, unsigned top, unsigned front, unsigned right, unsigned bottom, unsigned back):
+    left(left),
+    top(top),
+    front(front),
+    right(right),
+    bottom(bottom),
+    back(back)
 {
-    auto adapter = m_dxgi_objects[call.arg(0).toPointer()];
-    auto id = unwrapObj(call, "ppDevice");
-    m_devices[id] = std::make_shared<D3D11Device>(id);
-    std::cout << "createDevice " << m_devices[id] << " for adapter " << call.arg(0).toPointer() << " (" << adapter << ")\n";
-    m_devices[id]->addCall(trace2call(call));
-    m_devices[id]->addDependency(adapter);
-    getImmediateContext(call);
 }
 
-void D3D11Impl::getImmediateContext(const trace::Call& call)
+bool
+D3D11Box::isEmpty() const
 {
-    auto id = unwrapObj(call, "ppDevice"); // XXX
-    // TODO check whether the device exists
-    if (!m_devices[id]->m_context) {
-        auto ctx_id = unwrapObj(call, "ppImmediateContext");
-        auto ctx = std::make_shared<D3D11Context>(ctx_id, m_devices[id]);
-        m_devices[id]->m_context = ctx;
-        m_children[ctx_id] = ctx;
+    return (right <= left || bottom <= top || back <= front);
+}
+
+D3D11Mapping::D3D11Mapping(const trace::Call& call, unsigned subres,
+                           unsigned long long start, unsigned long long end,
+                           bool discard):
+    subres(subres),
+    start(start),
+    end(end),
+    range_min(UINT_MAX),
+    range_max(0),
+    discard(discard)
+{
+    calls.push_back(trace2call(call));
+}
+
+void
+D3D11Mapping::update(const trace::Call& call, unsigned long long update_start, unsigned long long update_end)
+{
+    calls.push_back(trace2call(call));
+
+    if (!discard) {
+        unsigned min = update_start - start;
+        unsigned max = update_end - start;
+        range_min = std::min(range_min, min);
+        range_max = std::max(range_max, max);
     }
-    m_devices[id]->addCall(trace2call(call));
 }
 
-void D3D11Impl::createSwapChain(const trace::Call& call)
+void
+D3D11Mapping::finish(const trace::Call& call)
 {
-    auto id = unwrapObj(call, "ppSwapChain");
-    auto device = m_devices[call.arg(1).toPointer()];
+    calls.push_back(trace2call(call));
+}
+
+Interface::Interface(const char *name, Pointer parent):
+    m_name(name),
+    m_parent(parent)
+{
+}
+
+Interface::Interface(const char *name):
+    m_name(name),
+    m_parent(std::shared_ptr<Interface>())
+{
+}
+
+void Interface::addCall(const char *name, ft_callback callback)
+{
+    m_call_table.insert({name, callback});
+}
+
+ft_callback Interface::findCall(const char *name)
+{
+    auto iter = m_call_table.find(name);
+    if (iter != m_call_table.end())
+        return iter->second;
+    if (m_parent)
+        return m_parent->findCall(name);
+    return nullptr;
+}
+
+Object::Object(ImplPtr impl, void *pointer):
+    m_impl(impl),
+    m_id(pointer),
+    m_refcount(1),
+    m_emitted(false),
+    m_emitting(false),
+    m_unrolled(false)
+{
+}
+
+PTraceCall Object::getInitCall() const
+{
+    return m_init_call;
+}
+
+void Object::setInitCall(const trace::Call& call)
+{
+    m_init_call = trace2call(call);
+}
+
+void Object::addCall(PTraceCall call)
+{
+    m_calls.insert(call);
+    m_emitted = false;
+}
+
+void Object::addCall(const trace::Call& call)
+{
+    addCall(trace2call(call));
+}
+
+void Object::clearCalls()
+{
+    /* Don't remove init call */
+    m_calls.clear();
+}
+
+bool Object::hasDependency(Pointer dep)
+{
+    auto iter = std::find(m_dependencies.begin(), m_dependencies.end(), dep);
+    return iter != m_dependencies.end();
+}
+
+void Object::addDependency(Pointer dep)
+{
+    assert(dep);
+    assert(!m_unrolled);
+    m_dependencies.insert(dep);
+    m_emitted = false;
+}
+
+void Object::addDependencies(Object::Pointer child, const trace::Array *deps)
+{
+    for (auto dep: deps->values) {
+        child->addDependency(lookup<Object>(dep->toPointer()));
+    }
+}
+
+void Object::moveTo(Pointer other)
+{
+    /* Don't move the init call */
+    other->m_calls = std::move(m_calls);
+    other->m_dependencies = std::move(m_dependencies);
+    other->m_emitted = false;
+
+    m_calls.clear();
+    m_dependencies.clear();
+}
+
+void Object::copyTo(Pointer other)
+{
+    assert(!other->m_unrolled);
+
+    other->m_calls.append(m_calls);
+    other->m_dependencies.merge(other->m_dependencies);
+    other->m_emitted = false;
+    m_dependencies.clear();
+}
+
+void Object::emitInitCallsTo(CallSet& out_list)
+{
+    if (this->m_emitting)
+        return;
+
+    m_emitting = true;
+    for (auto&& o: m_dependencies)
+        o->emitInitCallsTo(out_list);
+    out_list.insert(m_init_call);
+    m_emitting = false;
+}
+
+void Object::emitCallsTo(CallSet& out_list, DepSet& dep_list)
+{
+    if (this->m_emitting)
+        return;
+
+    m_emitting = true;
+    m_emitted = true;
+    {
+        out_list.insert(m_init_call);
+        out_list.append(m_calls);
+
+        for (auto&& o : m_dependencies) {
+            if (o->m_unrolled)
+                dep_list.insert(o);
+            else
+                o->emitCallsTo(out_list, dep_list);
+        }
+
+        emit(out_list, dep_list);
+    }
+    m_emitting = false;
+}
+
+void Object::emitCallsTo(CallSet& out_list)
+{
+    DepSet dep_list;
+
+    if (this->m_emitting)
+        return;
+
+    emitCallsTo(out_list, dep_list);
+    if (dep_list.empty())
+        return;
+
+    m_emitting = true;
+    std::cout << id() << " before emitting unrolled deps: " << dep_list.size() << "\n";
+    for (auto&& o: dep_list)
+        o->emitCallsTo(out_list);
+    m_emitting = false;
+}
+
+bool Object::emitted() const
+{
+    return m_emitted;
+}
+
+void Object::unroll()
+{
+    DepSet dep_list;
+
+    for (auto&& o : m_dependencies) {
+        if (o->m_unrolled)
+            dep_list.insert(o);
+        else
+            o->emitCallsTo(m_calls, dep_list);
+    }
+
+    std::cout << id() << " unrolled from " << m_dependencies.size() << " to " << dep_list.size() << " deps\n";
+    m_dependencies = std::move(dep_list);
+    m_unrolled = true;
+}
+
+template <class T>
+std::shared_ptr<T> Object::lookup(void* obj_id)
+{
+    return m_impl.lock()->lookup<T>(obj_id);
+}
+
+template <class T>
+std::shared_ptr<T> Object::get(const trace::Call &call, unsigned obj_id_param_id)
+{
+    return m_impl.lock()->get<T>(call, obj_id_param_id);
+}
+
+template <class T, typename... Args>
+std::shared_ptr<T> Object::create(const trace::Call &call, unsigned obj_id_param_id, Args... args)
+{
+    return m_impl.lock()->create<T>(call, shared_from_this(), obj_id_param_id, args...);
+}
+
+template <class T, typename... Args>
+std::shared_ptr<T> Object::getOrCreate(const trace::Call &call, const char *obj_id_param, Args... args)
+{
+    auto arg_id = call.findArg(obj_id_param);
+    return m_impl.lock()->getOrCreate<T>(call, shared_from_this(), arg_id, args...);
+}
+
+template <class T, typename... Args>
+std::shared_ptr<T> Object::createWithDep(const trace::Call &call, unsigned obj_id_param,
+                                 unsigned dep_id_param, Args... args)
+{
+    return m_impl.lock()->createWithDep<T>(call, shared_from_this(), obj_id_param, dep_id_param, args...);
+}
+
+template<class T, typename... Args>
+std::shared_ptr<T> Object::fakeCreate(const trace::Call& call, Args... args)
+{
+    return m_impl.lock()->fakeCreate<T>(call, shared_from_this(), args...);
+}
+
+void
+Object::callOnObject(const trace::Call& call, ePerDevice obj_type, unsigned obj_id_param)
+{
+    auto obj = get<Object>(call, obj_id_param);
+    // XXX what about view <-> resource
+    if (obj)
+        obj->addCall(call);
+}
+
+void
+Object::callOnObjectWithDep(const trace::Call& call, ePerDevice obj_type, unsigned obj_id_param,
+                            ePerDevice dep_type, unsigned dep_id_param)
+{
+    auto obj = get<Object>(call, obj_id_param);
+    auto dep = get<Object>(call, dep_id_param);
+
+    // XXX what about view <-> resource
+    if (obj && dep) {
+        obj->addCall(call);
+        obj->addDependency(dep);
+    }
+}
+
+void Object::AddRef(const trace::Call& call)
+{
+    m_refcount++;
+}
+
+void Object::Release(const trace::Call& call)
+{
+    assert(m_refcount > 0);
+    m_refcount--;
+}
+
+void Object::QueryInterface(const trace::Call& call)
+{
+    auto rrid = call.arg(1).toStruct();
+    if (true) {
+        getOrCreate<DXGIDevice>(call, "ppvObj");
+    }
+}
+
+DXGIObject::DXGIObject(ImplPtr impl, void *id):
+    Object(impl, id)
+{
+}
+
+void
+DXGIObject::GetParent(const trace::Call& call)
+{
+    getParent(call);
+}
+
+DXGIDevice::DXGIDevice(ImplPtr impl, void *id):
+    DXGIObject(impl, id)
+{
+}
+
+void
+DXGIDevice::getParent(const trace::Call& call)
+{
+    getOrCreate<DXGIAdapter>(call, "ppParent");
+}
+
+DXGIAdapter::DXGIAdapter(ImplPtr impl, void *id):
+    DXGIObject(impl, id)
+{
+}
+
+void
+DXGIAdapter::getParent(const trace::Call& call)
+{
+    getOrCreate<DXGIFactory>(call, "ppParent");
+}
+
+DXGIFactory::DXGIFactory(ImplPtr impl, void *id):
+    DXGIObject(impl, id)
+{
+}
+
+void
+DXGIFactory::getParent(const trace::Call& call)
+{
+    // noop
+}
+
+void
+DXGIFactory::CreateSwapChain(const trace::Call& call)
+{
+    auto desc = call.arg(2).toArray()->values[0]->toStruct();
+    auto buffer_desc = desc->members[0]->toStruct();
+    auto width = buffer_desc->members[0]->toUInt();
+    auto height = buffer_desc->members[1]->toUInt();
+
+    createWithDep<DXGISwapChain>(call, 3, 1, width, height);
+}
+
+void
+DXGIFactory::CreateSwapChainForHwnd(const trace::Call& call)
+{
     auto desc = call.arg(3).toArray()->values[0]->toStruct();
     auto width = desc->members[0]->toUInt();
     auto height = desc->members[1]->toUInt();
 
-    m_dxgi_objects[id] = std::make_shared<DXGISwapChain>(id, width, height);
-    m_dxgi_objects[id]->addCall(trace2call(call));
-    m_dxgi_objects[id]->addDependency(device);
+    createWithDep<DXGISwapChain>(call, 6, 1, width, height);
 }
 
-void D3D11Impl::enumAdapters(const trace::Call& call)
+void DXGIFactory::EnumAdapters(const trace::Call& call)
 {
-    if (call.ret->toSInt() != 0)
+    getOrCreate<DXGIAdapter>(call, "ppAdapter");
+}
+
+DXGISwapChain::DXGISwapChain(ImplPtr impl, void *id, unsigned width, unsigned height):
+    DXGIObject(impl, id),
+    m_width(width),
+    m_height(height)
+{
+}
+
+void
+DXGISwapChain::getParent(const trace::Call& call)
+{
+    getOrCreate<DXGIFactory>(call, "ppParent");
+}
+
+void
+DXGISwapChain::GetBuffer(const trace::Call& call)
+{
+    auto buf = getOrCreate<D3D11Texture2D>(call, "ppSurface", m_height, 0);
+    if (!hasDependency(buf))
+        addDependency(buf);
+}
+
+void
+DXGISwapChain::ResizeBuffers(const trace::Call& call)
+{
+    m_width = call.arg(2).toUInt();
+    m_height = call.arg(3).toUInt();
+    addCall(call);
+}
+
+void
+DXGISwapChain::ResizeTarget(const trace::Call& call)
+{
+    addCall(call);
+}
+
+void
+DXGISwapChain::Present(const trace::Call& call)
+{
+    m_impl.lock()->recordObject(shared_from_this());
+}
+
+D3D11Device::D3D11Device(ImplPtr impl, void *id):
+    Object(impl, id)
+{
+}
+
+void
+D3D11Device::GetImmediateContext(const trace::Call& call)
+{
+    getOrCreate<D3D11Context>(call, "ppImmediateContext");
+}
+
+void
+D3D11Device::CreateDeferredContext(const trace::Call& call)
+{
+    create<D3D11Context>(call, 2, true);
+}
+
+void
+D3D11Device::CreateState(const trace::Call& call)
+{
+    create<D3D11DeviceChild>(call, 2);
+}
+
+void
+D3D11Device::CreateShader(const trace::Call& call)
+{
+    createWithDep<D3D11DeviceChild>(call, 4, 3);
+}
+
+void
+D3D11Device::CreateGeometryShaderWithStreamOutput(const trace::Call& call)
+{
+    createWithDep<D3D11DeviceChild>(call, 9, 8);
+}
+
+void
+D3D11Device::CreateBuffer(const trace::Call& call)
+{
+    /* D3D11_BUFFER_DESC.ByteWidth */
+    unsigned size = call.arg(1).toArray()->values[0]->toStruct()->members[0]->toUInt();
+    create<D3D11Buffer>(call, 3, size);
+}
+
+void
+D3D11Device::CreateTexture1D(const trace::Call& call)
+{
+    /* Use byte size from map call */
+    create<D3D11Texture1D>(call, 3);
+}
+
+void
+D3D11Device::CreateTexture2D(const trace::Call& call)
+{
+    auto desc = call.arg(1).toArray()->values[0]->toStruct();
+    /* D3D11_TEXTURE2D_DESC.Height */
+    unsigned height = desc->members[1]->toUInt();
+    /* D3D11_TEXTURE2D_DESC.BindFlags */
+    unsigned bindFlags = desc->members[7]->toUInt();
+
+    create<D3D11Texture2D>(call, 3, height, bindFlags);
+}
+
+void
+D3D11Device::CreateTexture3D(const trace::Call& call)
+{
+    /* D3D11_TEXTURE3D_DESC.Depth */
+    unsigned depth = call.arg(1).toArray()->values[0]->toStruct()->members[2]->toUInt();
+    create<D3D11Texture3D>(call, 3, depth);
+}
+
+void
+D3D11Device::CreateView(const trace::Call& call)
+{
+    auto res = get<D3D11Resource>(call, 1);
+    if (!res) {
+        std::cout << "resource for new view doesn't exist\n";
         return;
-
-    auto factory = m_dxgi_objects[call.arg(0).toPointer()];
-    auto id = unwrapObj(call, "ppAdapter");
-
-    if (!m_dxgi_objects[id]) {
-        auto adapter = std::make_shared<DXGIObject>(id);
-        adapter->addCall(trace2call(call));
-        adapter->addDependency(factory);
-        m_dxgi_objects[id] = adapter;
-        std::cout << "enum adapter " << call.arg(1).toUInt() << " is " << id << " (" << adapter << ")\n";
     }
-}
 
-void D3D11Impl::resizeTarget(const trace::Call& call)
-{
-    auto swapchain = m_dxgi_objects[call.arg(0).toPointer()];
-    swapchain->addCall(trace2call(call));
-    if (m_recording_frame && swapchain->emitted())
-        swapchain->emitCallsTo(m_required_calls);
-}
-
-void D3D11Impl::resizeBuffers(const trace::Call& call)
-{
-    auto swapchain = std::static_pointer_cast<DXGISwapChain>(m_dxgi_objects[call.arg(0).toPointer()]);
-    swapchain->resizeBuffers(call.arg(2).toUInt(), call.arg(3).toUInt());
-    swapchain->addCall(trace2call(call));
-    if (m_recording_frame && swapchain->emitted())
-        swapchain->emitCallsTo(m_required_calls);
-}
-
-void D3D11Impl::getBuffer(const trace::Call& call)
-{
-    auto swapchain = std::static_pointer_cast<DXGISwapChain>(m_dxgi_objects[call.arg(0).toPointer()]);
-    auto id = unwrapObj(call, "ppSurface"); 
-    
-    if (!m_children[id]) {
-        m_children[id] = std::make_shared<D3D11Resource>(id, rt_texture_2d, swapchain->getHeight());
-        m_children[id]->addCall(trace2call(call)); // FIXME
-        m_children[id]->addDependency(swapchain);
-    }
-}
-
-D3D11Device::Pointer D3D11Impl::getDevice(const trace::Call& call)
-{
-    auto device = m_devices[call.arg(0).toPointer()];
-    assert(device);
-    return device;
-}
-
-D3D11Context::Pointer D3D11Impl::getContext(const trace::Call& call)
-{
-    auto context = m_children[call.arg(0).toPointer()];
-    assert(context);
-    return std::static_pointer_cast<D3D11Context>(context);
-}
-
-void D3D11Impl::addDependencies(D3D11DeviceChild::Pointer child, const trace::Array *deps)
-{
-    for (auto dep: deps->values) {
-        child->addDependency(m_children[dep->toPointer()]);
-    }
-}
-
-void D3D11Impl::create(const trace::Call& call, ePerDevice object_type, unsigned obj_id_param)
-{
-    auto id = unwrapObjAt(call, obj_id_param);
-    m_children[id] = std::make_shared<D3D11DeviceChild>(id);
-    m_children[id]->addCall(trace2call(call));
-}
-
-void D3D11Impl::createWithDep(const trace::Call& call, ePerDevice obj_type, unsigned obj_id_param,
-                              ePerDevice dep_type, unsigned dep_id_param)
-{
-    auto id = unwrapObjAt(call, obj_id_param);
-    auto dep_id = call.arg(dep_id_param).toPointer();
-
-    m_children[id] = std::make_shared<D3D11DeviceChild>(id);
-    if (dep_id) {
-        if (m_children[dep_id])
-            m_children[id]->addDependency(m_children[dep_id]);
-        else
-            std::cout << "error no dep " << dep_id <<  "\n";
-    }
-    m_children[id]->addCall(trace2call(call));
+    create<D3D11View>(call, 3, res);
 }
 
 void
-D3D11Impl::bindObject(const trace::Call& call, ePerContextBinding binding_type,
-                      unsigned bindpoint, unsigned slot, void *bound_obj_id)
+D3D11Device::CreateAsync(const trace::Call& call)
 {
-    auto ctx = getContext(call);
-    auto bindings = ctx->getBindingsOfType(binding_type);
-    auto bound_obj = bound_obj_id ? m_children[bound_obj_id] : nullptr;
+    create<D3D11DeviceChild>(call, 2);
+}
 
-    bindings[bindpoint][slot] = bound_obj;
+void
+D3D11Device::CreateClassLinkage(const trace::Call& call)
+{
+    create<D3D11DeviceChild>(call, 1);
+}
+
+void
+D3D11Device::CreateInputLayout(const trace::Call& call)
+{
+    create<D3D11DeviceChild>(call, 5);
+}
+
+D3D11DeviceChild::D3D11DeviceChild(ImplPtr impl, void *id):
+    Object(impl, id)
+{
+}
+
+D3D11State::D3D11State(const trace::Call& call)
+{
+    m_call = trace2call(call);
+}
+
+D3D11State::D3D11State(const trace::Call& call, D3D11DeviceChild::Pointer dep)
+{
+    m_call = trace2call(call);
+    m_dep = dep;
+}
+
+D3D11State::D3D11State(const D3D11State& other)
+{
+    m_call = other.m_call;
+    m_dep = other.m_dep;
+}
+
+void
+D3D11State::addTo(Object::Pointer dst)
+{
+    dst->addCall(m_call);
+    if (m_dep)
+        dst->addDependency(m_dep);
+}
+
+D3D11Binding::D3D11Binding(ImplPtr impl, void *id, D3D11DeviceChild::Pointer bound_obj):
+    D3D11DeviceChild(impl, id),
+    m_bound_obj(bound_obj)
+{
     if (bound_obj)
-        bound_obj->addCall(trace2call(call));
-    else
-        ctx->addCall(trace2call(call));
+        addDependency(bound_obj);
+}
 
-    if (m_recording_frame && bound_obj)
-        bound_obj->emitCallsTo(m_required_calls);
+template<class T>
+std::shared_ptr<T>
+D3D11Binding::get()
+{
+    return std::static_pointer_cast<T>(m_bound_obj);
+}
+
+D3D11Operation::D3D11Operation(ImplPtr impl, void *id, bool deferred):
+    D3D11DeviceChild(impl, id),
+    m_deferred(deferred)
+{
 }
 
 void
-D3D11Impl::bindObjects(const trace::Call& call, ePerContextBinding binding_type,
-                       unsigned bindpoint, unsigned slot, unsigned param_id)
+D3D11Operation::addStates(States& states)
+{
+    for (auto&& [state_flag, state]: states)
+        state.addTo(shared_from_this());
+
+}
+
+void
+D3D11Operation::addBoundAsDependency(Bindings& bindings, enum ePerContextBinding pcb, bool compute=false)
+{
+    for (auto [bindpoint, slots]: bindings[pcb]) {
+        bool is_compute = (bindpoint == ss_compute);
+        if (compute != is_compute)
+            return;
+
+        for (auto [slot, binding]: slots) {
+            if (!binding) {
+                std::cout << "null bound dep\n";
+                continue;
+            }
+            addDependency(binding);
+        }
+    }
+}
+
+void
+D3D11Operation::addToBound(Bindings& bindings, enum ePerContextBinding pcb)
+{
+    for (auto [bindpoint, slots]: bindings[pcb]) {
+        for (auto [slot, binding]: slots) {
+            binding->addDependency(shared_from_this());
+        }
+    }
+}
+
+void
+D3D11Operation::addToBoundView(Bindings& bindings, enum ePerContextBinding pcb, bool compute=false, FilterFn filter=nullptr)
+{
+    for (auto [bindpoint, slots]: bindings[pcb]) {
+        bool is_compute = (bindpoint == ss_compute);
+        if (compute != is_compute)
+            return;
+
+        for (auto [slot, binding]: slots) {
+            auto view = binding->get<D3D11View>();
+            if (!view)
+                continue;
+            if (filter && !filter(bindpoint, slot, view))
+                continue;
+            view->addUpdateDependency(shared_from_this());
+        }
+    }
+}
+
+D3D11Draw::D3D11Draw(ImplPtr impl, void *id, bool deferred):
+    D3D11Operation(impl, id, deferred)
+{
+}
+
+#define D3D11_BIND_SHADER_RESOURCE 0x8L
+
+void
+D3D11Draw::link(States& states, Bindings& bindings)
+{
+    addStates(states);
+
+    addBoundAsDependency(bindings, pcb_shaders);
+    addBoundAsDependency(bindings, pcb_samplers);
+    addBoundAsDependency(bindings, pcb_input_layout);
+    addBoundAsDependency(bindings, pcb_shader_resources);
+    addBoundAsDependency(bindings, pcb_constant_buffers);
+    addBoundAsDependency(bindings, pcb_vertex_buffers); // XXX take offset into consideration
+    addBoundAsDependency(bindings, pcb_unordered_access_views);
+    addBoundAsDependency(bindings, pcb_index_buffer); // XXX take offset into consideration
+    addBoundAsDependency(bindings, pcb_render_targets);
+    addBoundAsDependency(bindings, pcb_depth_stencil_view);
+
+    auto check = [](unsigned bindpoint, unsigned slot, D3D11DeviceChild::Pointer obj) {
+        if (!obj)
+            return false;
+        return std::static_pointer_cast<D3D11View>(obj)->hasBindFlag(D3D11_BIND_SHADER_RESOURCE);
+    };
+    addToBoundView(bindings, pcb_render_targets, false, check);
+    //addToBoundView(bindings, pcb_depth_stencil_view); //  FIXME only if depth/stencil is enabled?
+    //addToBoundView(bindings, pcb_unordered_access_views); // FIXME circular dependency?
+    addToBound(bindings, pcb_stream_out_targets);
+}
+
+D3D11Dispatch::D3D11Dispatch(ImplPtr impl, void *id, bool deferred):
+    D3D11Operation(impl, id, deferred)
+{
+}
+
+void
+D3D11Dispatch::link(States& states, Bindings& bindings)
+{
+    addBoundAsDependency(bindings, pcb_shaders, true);
+    addBoundAsDependency(bindings, pcb_samplers, true);
+    addBoundAsDependency(bindings, pcb_shader_resources, true);
+    addBoundAsDependency(bindings, pcb_constant_buffers, true);
+    addBoundAsDependency(bindings, pcb_unordered_access_views, true);
+
+    addToBoundView(bindings, pcb_unordered_access_views);
+}
+
+D3D11Resource::D3D11Resource(ImplPtr impl, void *id):
+    D3D11DeviceChild(impl, id)
+{
+}
+
+void
+D3D11Resource::addUpdateCall(const trace::Call& call)
+{
+    m_update_calls.push_back(trace2call(call));
+    std::cout << this << " has " << m_update_calls.size() << " calls\n";
+}
+
+void
+D3D11Resource::addUpdateDependency(Object::Pointer dep)
+{
+    assert(dep);
+    m_update_dependencies.insert(dep);
+    std::cout << id() << " has " << m_update_dependencies.size() << " dependencies\n";
+}
+
+void
+D3D11Resource::update(const trace::Call& call, unsigned subres, D3D11Box *box, unsigned size)
+{
+    /* we only keep track of updates for buffers */
+    addUpdateCall(call);
+}
+
+void
+D3D11Resource::update(D3D11Mapping& mapping)
+{
+    if (mapping.discard)
+        clearCalls();
+    for (auto &&call: mapping.calls) {
+        m_update_calls.push_back(call);
+    }
+}
+
+void
+D3D11Resource::clear()
+{
+    m_update_calls.clear();
+    m_update_dependencies.clear();
+}
+
+void
+D3D11Resource::emit(CallSet& out_list, DepSet& dep_list)
+{
+    for (auto &&n : m_update_calls)
+        out_list.insert(n);
+    m_update_calls.clear(); // XXX
+
+    for (auto &&o : m_update_dependencies) {
+        if (o->isUnrolled())
+            dep_list.insert(o);
+        else
+            o->emitCallsTo(out_list, dep_list);
+    }
+}
+
+D3D11Buffer::D3D11Buffer(ImplPtr impl, void *id, unsigned size):
+    D3D11Resource(impl, id),
+    m_size(size)
+{
+}
+
+unsigned
+D3D11Buffer::getMappedSize(unsigned width_stride, unsigned depth_stride)
+{
+    return m_size;
+}
+
+void
+D3D11Buffer::update(const trace::Call& call, unsigned subres, D3D11Box *box, unsigned size)
+{
+    std::vector<PTraceCall> calls = { trace2call(call) };
+    auto left = box ? box->left : 0;
+    updateBuffer(calls, subres, left, left + size);
+}
+
+void
+D3D11Buffer::update(D3D11Mapping& mapping)
+{
+    if (mapping.discard)
+        clear();
+    if (mapping.range_max > mapping.range_min)
+        updateBuffer(mapping.calls, mapping.subres, mapping.range_min, mapping.range_max);
+}
+
+void
+D3D11Buffer::updateBuffer(std::vector<PTraceCall> &calls, unsigned subres, unsigned begin, unsigned end)
+{
+    auto it = m_updates.begin();
+    while (it != m_updates.end()) {
+        auto update = *it;
+        if (begin <= update.end && update.begin <= end) {
+            if (begin > update.begin && end < update.end) {
+                /* update in the middle of an existing update, let it go */
+            } else if (begin > update.begin) {
+                update.end = begin;
+            } else if (end < update.end) {
+                update.begin = end;
+            } else {
+                /* exact match; remove old update */
+                it = m_updates.erase(it);
+                continue;
+            }
+        }
+
+        it++;
+    }
+
+    std::cout << "updating buffer from " << begin << " to " << end << "\n";
+    Update update {begin, end, calls};
+    m_updates.push_back(update);
+}
+
+void
+D3D11Buffer::clear()
+{
+    D3D11Resource::clear();
+    m_updates.clear();
+}
+
+void
+D3D11Buffer::emit(CallSet& out_list, DepSet& dep_list)
+{
+    D3D11Resource::emit(out_list, dep_list);
+    for (auto& update: m_updates) {
+        for (auto&& call: update.calls)
+            out_list.insert(call);
+    }
+}
+
+D3D11Texture1D::D3D11Texture1D(ImplPtr impl, void *id):
+    D3D11Resource(impl, id)
+{
+}
+
+unsigned
+D3D11Texture1D::getMappedSize(unsigned width_stride, unsigned depth_stride)
+{
+    return width_stride;
+}
+
+D3D11Texture2D::D3D11Texture2D(ImplPtr impl, void *id, unsigned height, unsigned bind_flags):
+    D3D11Resource(impl, id),
+    m_height(height),
+    m_bind_flags(bind_flags)
+{
+}
+
+unsigned
+D3D11Texture2D::getMappedSize(unsigned width_stride, unsigned depth_stride)
+{
+    return m_height * width_stride;
+}
+
+D3D11Texture3D::D3D11Texture3D(ImplPtr impl, void *id, unsigned depth):
+    D3D11Resource(impl, id),
+    m_depth(depth)
+{
+}
+
+unsigned
+D3D11Texture3D::getMappedSize(unsigned width_stride, unsigned depth_stride)
+{
+    return m_depth * depth_stride;
+}
+
+D3D11View::D3D11View(ImplPtr impl, void *id, D3D11Resource::Pointer res):
+    D3D11DeviceChild(impl, id),
+    m_resource(res)
+{
+    addDependency(res);
+}
+
+void
+D3D11View::addUpdateCall(const trace::Call& call)
+{
+    m_resource->addCall(getInitCall());
+    m_resource->addUpdateCall(call);
+}
+
+void
+D3D11View::addUpdateDependency(Object::Pointer dep)
+{
+    m_resource->addUpdateDependency(dep);
+}
+
+void
+D3D11View::clear(const trace::Call& call)
+{
+    m_resource->clear();
+    m_resource->addCall(getInitCall());
+    m_resource->addUpdateCall(call);
+}
+
+D3D11Context::D3D11Context(ImplPtr impl, void *id, bool deferred):
+    D3D11DeviceChild(impl, id),
+    m_deferred(deferred)
+{
+}
+
+void
+D3D11Context::bindObject(const trace::Call& call, ePerContextBinding binding_type,
+                         unsigned bindpoint, unsigned slot, void *bound_obj_id)
+{
+    auto& bindings = m_bindings[binding_type];
+    auto bound_obj = lookup<D3D11DeviceChild>(bound_obj_id);
+
+    // TODO cleanup
+    auto binding = fakeCreate<D3D11Binding>(call, bound_obj);
+    bindings[bindpoint][slot] = binding;
+
+    if (bound_obj_id)
+        assert(bound_obj);
+    if (bound_obj_id == (void *)0x429f90 && m_impl.lock()->isRecording())
+        std::cout << "fdfsdf\n";
+
+    if (bound_obj)
+        m_impl.lock()->recordObjectInit(bound_obj);
+}
+
+void
+D3D11Context::bindObjects(const trace::Call& call, ePerContextBinding binding_type,
+                          unsigned bindpoint, unsigned slot, unsigned param_id)
 {
     auto objects = call.arg(param_id).toArray();
 
@@ -553,64 +994,51 @@ D3D11Impl::bindObjects(const trace::Call& call, ePerContextBinding binding_type,
 }
 
 void
-D3D11Impl::bindSlot(const trace::Call& call, ePerContextBinding binding_type, unsigned param_id)
+D3D11Context::bindSlot(const trace::Call& call, ePerContextBinding binding_type, unsigned param_id)
 {
     auto res_id = call.arg(param_id).toPointer();
     bindObject(call, binding_type, 0, 0, res_id);
 }
 
 void
-D3D11Impl::bindSlots(const trace::Call& call, ePerContextBinding binding_type, unsigned bindpoint)
+D3D11Context::bindSlots(const trace::Call& call, ePerContextBinding binding_type, unsigned bindpoint)
 {
     auto slot = call.arg(1).toUInt();
     bindObjects(call, binding_type, bindpoint, slot, 3);
 }
 
-void
-D3D11Impl::callOnObject(const trace::Call& call, ePerDevice obj_type, unsigned obj_id_param)
-{
-    auto id = call.arg(obj_id_param).toPointer();
-    auto obj = m_children[id];
-    obj->addCall(trace2call(call));
-    // XXX what about view <-> resource
-}
 
 void
-D3D11Impl::callOnObjectWithDep(const trace::Call& call, ePerDevice obj_type, unsigned obj_id_param,
-                               ePerDevice dep_type, unsigned dep_id_param)
+D3D11Context::ClearView(const trace::Call& call)
 {
-    auto id = call.arg(obj_id_param).toPointer();
-    auto dep_id = call.arg(dep_id_param).toPointer();
-    auto obj = m_children[id];
-
-    obj->addCall(trace2call(call));
-    if (!m_children[dep_id]) {
-        std::cout << "callOnObjectWithDep with null dep\n";
-        return;
-    }
-    obj->addDependency(m_children[dep_id]);
-    // XXX what about view <-> resource
+    auto view = get<D3D11View>(call, 1);
+    view->clear(call);
 }
 
-void D3D11Impl::createState(const trace::Call& call)
+void
+D3D11Context::FinishCommandList(const trace::Call& call)
 {
-    create(call, pd_states, 2);
+    // TODO auto restore = call.arg(1).toBool();
+    auto cmdlist = create<D3D11CommandList>(call, 2);
+    assert(m_deferred);
+    moveTo(cmdlist);
+    cmdlist->addCall(getInitCall());
 }
 
-void D3D11Impl::createShader(const trace::Call& call)
+void
+D3D11Context::ExecuteCommandList(const trace::Call& call)
 {
-    createWithDep(call, pd_shaders, 4, pd_class_linkages, 3);
+    // XXX Merge bindings and state
+    auto cmdlist = get<D3D11CommandList>(call, 1);
+
+    if (!m_deferred)
+        cmdlist->unroll();
+    m_impl.lock()->recordObject(cmdlist);
 }
 
-void D3D11Impl::createShaderWithStreamOutput(const trace::Call& call)
+void
+D3D11Context::SetShader(const trace::Call& call, unsigned bindpoint)
 {
-    createWithDep(call, pd_shaders, 9, pd_class_linkages, 8);
-}
-
-void D3D11Impl::bindShader(const trace::Call& call, unsigned bindpoint)
-{
-    auto ctx = getContext(call);
-
     auto shader_id = call.arg(1).toPointer();
     //XXX auto linkages = call.arg(2).toArray();
     //addDependencies(ctx, linkages);
@@ -618,261 +1046,631 @@ void D3D11Impl::bindShader(const trace::Call& call, unsigned bindpoint)
     bindObject(call, pcb_shaders, bindpoint, 0, shader_id);
 }
 
-void D3D11Impl::createResource(const trace::Call& call, eResourceType kind, unsigned size)
-{
-    auto id = unwrapObjAt(call, 3);
-    m_children[id] = std::make_shared<D3D11Resource>(id, kind, size);
-    m_children[id]->addCall(trace2call(call));
-}
-
-void D3D11Impl::createBuffer(const trace::Call& call)
-{
-    /* D3D11_BUFFER_DESC.ByteWidth */
-    unsigned size = call.arg(1).toArray()->values[0]->toStruct()->members[0]->toUInt();
-    createResource(call, rt_buffer, size);
-}
-
-void D3D11Impl::createTexture1D(const trace::Call& call)
-{
-    /* Use byte size from map call */
-    createResource(call, rt_texture_1d, 1);
-}
-
-void D3D11Impl::createTexture2D(const trace::Call& call)
-{
-    /* D3D11_TEXTURE2D_DESC.Height */
-    unsigned height = call.arg(1).toArray()->values[0]->toStruct()->members[1]->toUInt();
-    createResource(call, rt_texture_2d, height);
-}
-
-void D3D11Impl::createTexture3D(const trace::Call& call)
-{
-    /* D3D11_TEXTURE3D_DESC.Depth */
-    unsigned depth = call.arg(1).toArray()->values[0]->toStruct()->members[2]->toUInt();
-    createResource(call, rt_texture_3d, depth);
-}
-
-void D3D11Impl::createView(const trace::Call& call)
-{
-    auto id = unwrapObjAt(call, 3);
-    auto dep_id = call.arg(1).toPointer();
-    auto res = std::static_pointer_cast<D3D11Resource>(m_children[dep_id]);
-
-    m_children[id] = std::make_shared<D3D11View>(id, res);
-    if (!m_children[dep_id]) {
-        std::cout << "resource " << dep_id << " for new view doesn't exist\n";
-        return;
-    }
-    m_children[id]->addDependency(m_children[dep_id]);
-    m_children[dep_id]->addDependency(m_children[id]);
-    m_children[id]->addCall(trace2call(call));
-}
-
-void D3D11Impl::bindRenderTargets(const trace::Call& call)
+void
+D3D11Context::BindRenderTargets(const trace::Call& call)
 {
     bindObjects(call, pcb_render_targets, 0, 0, 2);
     bindSlot(call, pcb_depth_stencil_view, 3);
 }
 
-void D3D11Impl::bindRenderTargetsAndUAVS(const trace::Call& call)
+void
+D3D11Context::BindRenderTargetsAndUAVS(const trace::Call& call)
 {
     bindObjects(call, pcb_render_targets, 0, 0, 2);
     bindSlot(call, pcb_depth_stencil_view, 3);
     bindObjects(call, pcb_unordered_access_views, 0, 0, 5);
 }
 
-void D3D11Impl::clearView(const trace::Call& call)
+void
+D3D11Context::GetBoundRenderTargets(const trace::Call& call)
 {
-    auto view = std::static_pointer_cast<D3D11View>(m_children[call.arg(1).toPointer()]);
+    if (!m_impl.lock()->isRecording())
+        return;
 
-    //XXX view->emitCallsTo(view->resource);
-    view->addCall(trace2call(call));
+    // Make sure the last binding has been recorded
+    for (auto [bindpoint, slots]: m_bindings[pcb_render_targets]) {
+        for (auto [slot, binding]: slots) {
+            m_impl.lock()->recordObject(binding);
+        }
+    }
+    for (auto [bindpoint, slots]: m_bindings[pcb_depth_stencil_view]) {
+        for (auto [slot, binding]: slots) {
+            m_impl.lock()->recordObject(binding);
+        }
+    }
 }
 
-void D3D11Impl::createAsync(const trace::Call& call)
+void
+D3D11Context::SetState(const trace::Call& call, ePerContextState state_flag)
 {
-    create(call, pd_asyncs, 2);
+    m_states.insert_or_assign(state_flag, D3D11State(call));
 }
 
-void D3D11Impl::setState(const trace::Call& call, ePerContextState state_flag)
+void
+D3D11Context::BindState(const trace::Call& call, ePerContextState state_flag)
 {
-    auto ctx = getContext(call);
-    ctx->m_state_calls[state_flag] = trace2call(call);
-
-    // TODO if deferred context
-}
-
-void D3D11Impl::bindState(const trace::Call& call, ePerContextState state_flag)
-{
-    auto ctx = getContext(call);
     auto dep_id = call.arg(1).toPointer();
 
     if (dep_id) {
-        ctx->m_state_calls[state_flag] = trace2call(call);
-        ctx->m_state_deps[state_flag] = m_children[dep_id];
-
-        if (m_recording_frame) {
-            m_children[dep_id]->emitCallsTo(m_required_calls);
-        }
+        auto dep = get<D3D11DeviceChild>(call, 1);
+        m_states.insert_or_assign(state_flag, D3D11State(call, dep));
+        m_impl.lock()->recordObject(dep);
     } else {
-        ctx->m_state_calls.erase(state_flag);
-        ctx->m_state_deps.erase(state_flag);
+        m_states.insert_or_assign(state_flag, D3D11State(call));
     }
 }
 
-void D3D11Impl::clearState(const trace::Call& call)
+void
+D3D11Context::ClearState(const trace::Call& call)
 {
-    auto ctx = getContext(call);
-
-    ctx->m_state_calls.clear();
-    ctx->m_state_deps.clear();
-    ctx->m_render_targets.clear();
-    // TODO
+    // FIXME the call should probably be recorded
+    m_states.clear();
+    for (int i = 0; i < BINDING_TYPE_COUNT; i++)
+        m_bindings[i].clear();
 }
 
-void D3D11Impl::memcopy(const trace::Call& call)
+void
+D3D11Context::Map(const trace::Call& call)
 {
-    uintptr_t start = call.arg(0).toUInt();
-    uintptr_t data_end = start + call.arg(2).toUInt();
-    SubresourceId res_id = std::make_pair(nullptr, 0);
-
-    for (auto&& [id, range ]: m_buffer_mappings) {
-        if (range.first <= start && start < range.second) {
-            if (data_end > range.second) {
-                std::cerr << "\n:Error "<< call.no << "(memcpy): Mapped target range is ["
-                          << range.first << ", " << range.second << "] but data requires ["
-                          << start << ", " << data_end << "]\n";
-                assert(0);
-            }
-
-            res_id = id;
-            break;
-        }
-    }
-    if (!res_id.first) {
-        std::cerr << "Found no mapping for memcopy to " << start << " in call " << call.no << ": " << call.name() << "\n";
-        assert(0);
-        return;
-    }
-
-    auto res = m_children[res_id.first];
-    res->addCall(trace2call(call));
-
-    if (m_recording_frame)
-        res->emitCallsTo(m_required_calls);
-}
-
-void D3D11Impl::map(const trace::Call& call)
-{
-    auto ctx = getContext(call);
-    auto res = std::static_pointer_cast<D3D11Resource>(m_children[call.arg(1).toPointer()]);
+    auto res = get<D3D11Resource>(call, 1);
     auto subres = call.arg(2).toUInt();
+    auto discard = (call.arg(3).toSInt() == 4);
     auto mapped_subres = call.arg(5).toArray()->values[0]->toStruct();
-    uintptr_t begin = reinterpret_cast<uintptr_t>(mapped_subres->members[0]->toPointer());
+    auto begin = mapped_subres->members[0]->toUInt();
     auto row_pitch = mapped_subres->members[1]->toUInt();
     auto depth_pitch = mapped_subres->members[2]->toUInt();
     auto end = begin + res->getMappedSize(row_pitch, depth_pitch);
+    auto mapping_id = std::make_tuple(id(), res->id(), subres);
 
-    m_buffer_mappings[std::make_pair(res->id(), subres)] = std::make_pair(begin, end);
-    res->addCall(trace2call(call));
-
-    // TODO https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-map#null-pointers-for-pmappedresource
-    /*auto map_type = call.arg(3).toUInt();
-    if (map_type == D3D11_MAP_WRITE_DISCARD) {
-        // XXX only keep resource creation call
-    }*/
+    m_impl.lock()->recordObjectInit(res);
+    m_impl.lock()->addMapping(call, mapping_id, begin, end, discard);
 }
 
-void D3D11Impl::unmap(const trace::Call& call)
+void
+D3D11Context::Unmap(const trace::Call& call)
 {
-    auto res = std::static_pointer_cast<D3D11Resource>(m_children[call.arg(1).toPointer()]);
+    auto res = get<D3D11Resource>(call, 1);
     auto subres = call.arg(2).toUInt();
-    auto id = std::make_pair(res->id(), subres);
+    auto mapping_id = std::make_tuple(id(), res->id(), subres);
 
-    m_buffer_mappings.erase(id);
-    res->addCall(trace2call(call));
-}
-
-void D3D11Impl::copyResource(const trace::Call& call, unsigned dst_param_id, unsigned src_param_id)
-{
-    callOnObjectWithDep(call, pd_resources, dst_param_id, pd_resources, src_param_id);
-}
-
-void addBoundAsDependencyTo(ObjectBindings& bindings, D3D11DeviceChild::Pointer obj)
-{
-    for (auto [bindpoint, slots]: bindings) {
-        for (auto [slot, dep]: slots) {
-            if (!dep) {
-                std::cout << "null bound dep\n";
-                continue;
-            }
-            obj->addDependency(dep);
-        }
-    }
-}
-
-void addDependencyToBound(ObjectBindings& bindings, D3D11DeviceChild::Pointer dep)
-{
-            if (!dep) {
-                std::cout << "null dep\n";
-                return;
-            }
-    for (auto [bindpoint, slots]: bindings) {
-        for (auto [slot, obj]: slots) {
-            obj->addDependency(dep);
-        }
-    }
-}
-
-void D3D11Impl::draw(const trace::Call& call)
-{
-    auto ctx = getContext(call);
-    auto draw = make_shared<D3D11DeviceChild>((void *)call.no);
-
-    for (auto [state_flag, call]: ctx->m_state_calls) {
-        draw->addCall(call);
-    }
-    for (auto [state_flag, dep]: ctx->m_state_deps) {
-        draw->addDependency(dep);
-    }
-
-    // XXX add current state as dependency
-
-    addBoundAsDependencyTo(ctx->m_shaders, draw);
-    addBoundAsDependencyTo(ctx->m_samplers, draw);
-    addBoundAsDependencyTo(ctx->m_input_layout, draw);
-    addBoundAsDependencyTo(ctx->m_shader_resources, draw);
-    addBoundAsDependencyTo(ctx->m_constant_buffers, draw);
-    addBoundAsDependencyTo(ctx->m_vertex_buffers, draw);
-    addBoundAsDependencyTo(ctx->m_index_buffer, draw);
-    addBoundAsDependencyTo(ctx->m_render_targets, draw);
-
-    addDependencyToBound(ctx->m_render_targets, draw);
-    addDependencyToBound(ctx->m_depth_stencil_view, draw);
-    addDependencyToBound(ctx->m_stream_out_targets, draw);
-
-    draw->addCall(trace2call(call));
-    if (m_recording_frame) {
-        std::cout << "recording frame\n";
-        draw->emitCallsTo(m_required_calls);
-    }
-}
-
-#if 0
-void
-D3D11Impl::updateCallTable(const std::vector<const char*>& names,
-                                        ft_callback cb)
-{
-    for (auto& i : names)
-        m_call_table.insert(std::make_pair(i, cb));
+    m_impl.lock()->removeMapping(call, mapping_id);
 }
 
 void
-D3D11Impl::recordRequiredCall(const trace::Call& call)
+D3D11Context::UpdateSubresource(const trace::Call& call)
 {
-    auto c = trace2call(call);
-    m_required_calls.insert(c);
+    auto res = get<D3D11Resource>(call, 1);
+    auto subres = call.arg(2).toUInt();
+    auto box = toBox(call, 3);
+    auto size = call.arg(4).toBlob()->size;
+
+    /* noop if box is empty */
+    if (!box || !box->isEmpty())
+        res->update(call, subres, box, size);
+    delete box;
 }
-#endif
+
+void
+D3D11Context::CopyResource(const trace::Call& call)
+{
+    auto dst = get<D3D11Resource>(call, 1);
+    auto src = get<D3D11Resource>(call, 2);
+
+    dst->clear();
+    dst->addUpdateCall(call);
+    dst->addUpdateDependency(src);
+}
+
+void
+D3D11Context::CopySubresourceRegion(const trace::Call& call)
+{
+    auto dst = get<D3D11Resource>(call, 1);
+    auto src = get<D3D11Resource>(call, 6);
+
+    dst->addUpdateCall(call);
+    dst->addUpdateDependency(src);
+}
+
+void
+D3D11Context::CopyStructureCount(const trace::Call& call)
+{
+    auto dst = get<D3D11Buffer>(call, 1);
+    auto src = get<D3D11View>(call, 3);
+
+    dst->clear();
+    dst->addUpdateCall(call);
+    dst->addUpdateDependency(src);
+}
+
+void
+D3D11Context::addOperation(D3D11Operation::Pointer op)
+{
+    // Emit list of calls right away for all dependencies of draw
+
+    op->link(m_states, m_bindings);
+    if (m_deferred) {
+        addDependency(op);
+    } else {
+        op->unroll();
+        m_impl.lock()->recordObject(op);
+    }
+}
+
+void
+D3D11Context::Draw(const trace::Call& call)
+{
+    auto draw = fakeCreate<D3D11Draw>(call, m_deferred);
+    addOperation(draw);
+}
+
+void
+D3D11Context::DrawIndirect(const trace::Call& call)
+{
+    auto draw = fakeCreate<D3D11Draw>(call, m_deferred);
+    auto res = get<D3D11Buffer>(call, 1);
+    draw->addDependency(res);
+    addOperation(draw);
+}
+
+void
+D3D11Context::Dispatch(const trace::Call& call)
+{
+    auto dispatch = fakeCreate<D3D11Dispatch>(call, m_deferred);
+    addOperation(dispatch);
+}
+
+void
+D3D11Context::DispatchIndirect(const trace::Call& call)
+{
+    auto dispatch = fakeCreate<D3D11Dispatch>(call, m_deferred);
+    auto res = get<D3D11Buffer>(call, 1);
+    dispatch->addDependency(res);
+    addOperation(dispatch);
+}
+
+void
+D3D11Context::Begin(const trace::Call& call)
+{
+    auto async = get<D3D11DeviceChild>(call, 1);
+    async->addCall(call);
+    m_impl.lock()->recordObject(async);
+}
+
+void
+D3D11Context::End(const trace::Call& call)
+{
+    auto async = get<D3D11DeviceChild>(call, 1);
+    async->addCall(call);
+    m_impl.lock()->recordObject(async);
+    async->clearCalls();
+}
+
+D3D11CommandList::D3D11CommandList(ImplPtr impl, void *id):
+    D3D11DeviceChild(impl, id)
+{
+}
+
+D3D11Impl::D3D11Impl(bool keep_all_states):
+    FrameTrimmer(keep_all_states)
+{
+    registerInterfaces();
+}
+
+ft_callback
+D3D11Impl::findCallback(const char *name)
+{
+    const char *del = strstr(name, "::");
+
+    if (del) {
+        /* Interface specific method */
+        auto method_name = del + 2;
+        auto iter = m_interfaces.find(name);
+        if (iter == m_interfaces.end())
+            return nullptr;
+        return iter->second->findCall(method_name);
+    } else {
+        /* Global method */
+        auto iter = m_call_table.find(name);
+        if (iter == m_call_table.end())
+            return nullptr;
+        return iter->second;
+    }
+}
+
+void D3D11Impl::emitState()
+{
+}
+
+// Map callbacks to call methods of FrameTrimImpl
+#define MAP(name, ...) \
+    { \
+        auto f = [&](const trace::Call& call) { \
+            this->name(call, ## __VA_ARGS__); \
+        }; \
+        m_call_table.insert(std::make_pair(#name, f)); \
+    }
+
+#define BEGIN_INTERFACE(name, classname, inherit) \
+    do { \
+        using Class = classname; \
+        auto parent = m_interfaces[#inherit]; \
+        auto interface = std::make_shared<Interface>(#name, parent); \
+        m_interfaces[#name] = interface;
+
+#define END_INTERFACE() \
+    } while (0);
+
+#define METHOD_AS(name, func, ...) \
+    { \
+        auto f = [&](const trace::Call& call) { \
+            auto obj_id = call.arg(0).toPointer(); \
+            auto obj = std::static_pointer_cast<Class>(m_objects[obj_id]); \
+            assert(obj); \
+            obj->func(call, ## __VA_ARGS__); \
+        }; \
+        interface->addCall(#name, f); \
+    }
+
+#define METHOD(name, ...) \
+    METHOD_AS(name, name, __VA_ARGS__)
+
+void D3D11Impl::registerInterfaces()
+{
+    // top-level interface
+    m_interfaces.insert({"None", std::make_shared<Interface>("None")});
+
+    MAP(CreateDXGIFactory);
+    MAP(D3D11CreateDevice);
+    MAP(D3D11CreateDeviceAndSwapChain);
+    MAP(memcpy);
+
+    BEGIN_INTERFACE(IUnknown, Object, None)
+        METHOD(AddRef)
+        METHOD(Release)
+        METHOD(QueryInterface)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(IDXGIObject, DXGIObject, IUnknown)
+        METHOD(GetParent)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(IDXGIFactory, DXGIFactory, IDXGIObject)
+        METHOD(CreateSwapChain);
+        METHOD(CreateSwapChainForHwnd);
+        METHOD(EnumAdapters);
+        METHOD_AS(EnumAdapters1, EnumAdapters);
+        // METHOD(EnumAdapterByLuuid, enumAdapter)
+        // METHOD(EnumWarpAdapter, enumAdapter)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(IDXGIDevice, DXGIDevice, IDXGIObject)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(IDXGIAdapter, DXGIAdapter, IDXGIObject)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(IDXGISwapChain, DXGISwapChain, IDXGIObject)
+        METHOD(ResizeBuffers);
+        METHOD(ResizeTarget);
+        METHOD(GetBuffer);
+        METHOD(Present);
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11Device, D3D11Device, IUnknown)
+        METHOD(GetImmediateContext);
+        METHOD(CreateDeferredContext);
+
+        METHOD_AS(CreateBlendState, CreateState);
+        METHOD_AS(CreateDepthStencilState, CreateState);
+        METHOD_AS(CreateRasterizerState, CreateState);
+        METHOD_AS(CreateSamplerState, CreateState);
+
+        METHOD_AS(CreateVertexShader, CreateShader)
+        METHOD_AS(CreateHullShader, CreateShader)
+        METHOD_AS(CreateDomainShader, CreateShader)
+        METHOD_AS(CreateGeometryShader, CreateShader)
+        METHOD_AS(CreatePixelShader, CreateShader)
+        METHOD_AS(CreateComputeShader, CreateShader)
+        METHOD(CreateGeometryShaderWithStreamOutput)
+
+        METHOD(CreateBuffer);
+        METHOD(CreateTexture1D);
+        METHOD(CreateTexture2D);
+        METHOD(CreateTexture3D);
+
+        METHOD_AS(CreateShaderResourceView, CreateView);
+        METHOD_AS(CreateUnorderedAccessView, CreateView);
+        METHOD_AS(CreateRenderTargetView, CreateView);
+        METHOD_AS(CreateDepthStencilView, CreateView);
+
+        METHOD_AS(CreateQuery, CreateAsync);
+        METHOD_AS(CreateCounter, CreateAsync);
+        METHOD_AS(CreatePredicate, CreateAsync);
+
+        METHOD(CreateClassLinkage);
+        METHOD(CreateInputLayout);
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11DeviceContext, D3D11Context, IUnknown)
+        METHOD(FinishCommandList);
+        METHOD(ExecuteCommandList);
+
+        METHOD(ClearState);
+        //TODO METHOD(Flush, addCall);
+
+        METHOD_AS(IASetIndexBuffer, bindSlot, pcb_index_buffer, 1);
+        METHOD_AS(IASetVertexBuffers, bindSlots, pcb_vertex_buffers, ss_vertex);
+        METHOD_AS(IASetInputLayout, bindSlot, pcb_input_layout, 1);
+        METHOD_AS(IASetPrimitiveTopology, SetState, pc_primitive_topology);
+
+        METHOD_AS(OMSetBlendState, BindState, pc_blend);
+        METHOD_AS(OMSetDepthStencilState, BindState, pc_depth_stencil);
+        METHOD_AS(OMSetRenderTargets, BindRenderTargets);
+        METHOD_AS(OMSetRenderTargetsAndUnorderedAccessViews, BindRenderTargetsAndUAVS);
+        METHOD_AS(OMGetRenderTargets, GetBoundRenderTargets);
+
+        METHOD_AS(RSSetViewports, SetState, pc_viewport);
+        METHOD_AS(RSSetScissorRects, SetState, pc_scissor);
+        METHOD_AS(RSSetState, BindState, pc_rasterizer);
+
+        METHOD_AS(SOSetTargets, bindObjects, pcb_stream_out_targets, 0, 0, 2);
+
+        METHOD_AS(VSSetShader, SetShader, ss_vertex);
+        METHOD_AS(HSSetShader, SetShader, ss_hull);
+        METHOD_AS(DSSetShader, SetShader, ss_domain);
+        METHOD_AS(GSSetShader, SetShader, ss_geometry);
+        METHOD_AS(PSSetShader, SetShader, ss_pixel);
+        METHOD_AS(CSSetShader, SetShader, ss_compute);
+
+        METHOD_AS(VSSetSamplers, bindSlots, pcb_samplers, ss_vertex);
+        METHOD_AS(HSSetSamplers, bindSlots, pcb_samplers, ss_hull);
+        METHOD_AS(DSSetSamplers, bindSlots, pcb_samplers, ss_domain);
+        METHOD_AS(GSSetSamplers, bindSlots, pcb_samplers, ss_geometry);
+        METHOD_AS(PSSetSamplers, bindSlots, pcb_samplers, ss_pixel);
+        METHOD_AS(CSSetSamplers, bindSlots, pcb_samplers, ss_compute);
+
+        METHOD_AS(VSSetShaderResources, bindSlots, pcb_shader_resources, ss_vertex);
+        METHOD_AS(HSSetShaderResources, bindSlots, pcb_shader_resources, ss_hull);
+        METHOD_AS(DSSetShaderResources, bindSlots, pcb_shader_resources, ss_domain);
+        METHOD_AS(GSSetShaderResources, bindSlots, pcb_shader_resources, ss_geometry);
+        METHOD_AS(PSSetShaderResources, bindSlots, pcb_shader_resources, ss_pixel);
+        METHOD_AS(CSSetShaderResources, bindSlots, pcb_shader_resources, ss_compute);
+
+        METHOD_AS(VSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_vertex);
+        METHOD_AS(HSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_hull);
+        METHOD_AS(DSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_domain);
+        METHOD_AS(GSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_geometry);
+        METHOD_AS(PSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_pixel);
+        METHOD_AS(CSSetConstantBuffers, bindSlots, pcb_constant_buffers, ss_compute);
+
+        METHOD_AS(CSSetUnorderedAccessViews, bindSlots, pcb_unordered_access_views, ss_compute);
+
+        METHOD_AS(ClearRenderTargetView, ClearView);
+        METHOD_AS(ClearDepthStencilView, ClearView);
+        METHOD_AS(ClearUnorderedAccessViewFloat, ClearView);
+        METHOD_AS(ClearUnorderedAccessViewUint, ClearView);
+
+        METHOD(Map);
+        METHOD(Unmap);
+        METHOD_AS(UpdateResource, callOnObject, pd_resources, 1);
+        METHOD(UpdateSubresource);
+        METHOD(CopyResource);
+        METHOD(CopyStructureCount);
+        METHOD(CopySubresourceRegion);
+        METHOD_AS(GenerateMips, callOnObject, pd_views, 1);
+
+    #if 0
+        METHOD(SetPredication);
+        METHOD(GetData);
+    #endif
+        METHOD(Begin); // query, predicate and counter
+        METHOD(End);
+
+        METHOD(Draw);
+        METHOD_AS(DrawAuto, Draw);
+        METHOD_AS(DrawIndexed, Draw);
+        METHOD_AS(DrawIndexedInstanced, Draw);
+        METHOD_AS(DrawInstanced, Draw);
+        METHOD_AS(DrawIndexedInstancedIndirect, DrawIndirect);
+        METHOD_AS(DrawInstancedIndirect, DrawIndirect);
+
+        METHOD(Dispatch);
+        METHOD(DispatchIndirect);
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11Buffer, D3D11Buffer, IUnknown)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11Texture1D, D3D11Texture1D, IUnknown)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11Texture2D, D3D11Texture2D, IUnknown)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11Texture3D, D3D11Texture3D, IUnknown)
+    END_INTERFACE()
+
+    BEGIN_INTERFACE(ID3D11CommandList, D3D11CommandList, IUnknown)
+    END_INTERFACE()
+}
+
+bool D3D11Impl::skipDeleteObj(const trace::Call& call)
+{
+    const char *del = strstr(call.name(), "::");
+
+    if (!del)
+        return false;
+
+    auto method_name = del + 2;
+    if (strcmp(method_name, "Release") != 0)
+        return false;
+
+    /*auto obj_id = call.arg(0).toPointer();
+    auto ret = lookup<Object>(obj_id);
+    if (ret)
+        return false;*/
+
+    // TODO add back Release() call at the end of the frame if we try to loop
+    // the last frame?
+
+    return true;
+}
+
+void
+D3D11Impl::recordObject(Object::Pointer obj)
+{
+    if (!obj)
+        return;
+    if (m_recording_frame)
+        obj->emitCallsTo(m_required_calls);
+}
+
+void
+D3D11Impl::recordObjectInit(Object::Pointer obj)
+{
+    if (m_recording_frame)
+        obj->emitInitCallsTo(m_required_calls);
+}
+
+template<class T>
+std::shared_ptr<T>
+D3D11Impl::lookup(void* obj_id)
+{
+    return std::static_pointer_cast<T>(m_objects[obj_id]);
+}
+
+template<class T>
+std::shared_ptr<T>
+D3D11Impl::get(const trace::Call& call, unsigned obj_id_param_id)
+{
+    auto obj_id = call.arg(obj_id_param_id).toPointer();
+    return lookup<T>(obj_id);
+}
+
+template<class T, typename... Args>
+std::shared_ptr<T>
+D3D11Impl::create(const trace::Call& call, Object::Pointer parent, unsigned obj_id_param_id, Args... args)
+{
+    if (call.ret->toSInt() != 0)
+        return std::shared_ptr<T>();
+
+    auto id = unwrapObjAt(call, obj_id_param_id);
+
+    auto obj = std::make_shared<T>(shared_from_this(), id, args...);
+    obj->setInitCall(call);
+    if (parent)
+        obj->addDependency(parent);
+    m_objects[id] = obj;
+
+    return obj;
+}
+
+template<class T, typename... Args>
+std::shared_ptr<T>
+D3D11Impl::createWithDep(const trace::Call& call, Object::Pointer parent,
+                         unsigned obj_id_param, unsigned dep_id_param,
+                         Args... args)
+{
+    auto obj = create<T>(call, parent, obj_id_param, args...);
+
+    auto dep_id = call.arg(dep_id_param).toPointer();
+    if (dep_id) {
+        auto dep = m_objects[dep_id];
+        obj->addDependency(dep);
+    }
+
+    return obj;
+}
+
+template<class T, typename... Args>
+std::shared_ptr<T>
+D3D11Impl::getOrCreate(const trace::Call& call, Object::Pointer parent, unsigned obj_id_param_id, Args... args)
+{
+    auto obj_id = unwrapObjAt(call, obj_id_param_id);
+    auto ret = lookup<T>(obj_id);
+
+    if (ret)
+        return ret;
+    return create<T>(call, parent, obj_id_param_id, args...);
+}
+
+template<class T, typename... Args>
+std::shared_ptr<T>
+D3D11Impl::fakeCreate(const trace::Call& call, Object::Pointer parent, Args... args)
+{
+    /* TODO explain */
+    auto obj = make_shared<T>(shared_from_this(), (void *)call.no, args...);
+    obj->setInitCall(call);
+    obj->addDependency(parent);
+    return obj;
+}
+
+void
+D3D11Impl::CreateDXGIFactory(const trace::Call& call)
+{
+    auto arg_id = call.findArg("ppFactory");
+    create<DXGIFactory>(call, std::shared_ptr<Object>(), arg_id);
+}
+
+void
+D3D11Impl::D3D11CreateDevice(const trace::Call& call)
+{
+    auto dev = createWithDep<D3D11Device>(call, std::shared_ptr<Object>(), 7, 0);
+    dev->GetImmediateContext(call);
+}
+
+void
+D3D11Impl::D3D11CreateDeviceAndSwapChain(const trace::Call& call)
+{
+    auto dev = createWithDep<D3D11Device>(call, std::shared_ptr<Object>(), 10, 0);
+    dev->GetImmediateContext(call);
+}
+
+void D3D11Impl::addMapping(const trace::Call& call, SubresourceId id,
+                           unsigned long long start, unsigned long long end,
+                           bool discard)
+{
+    auto subres = std::get<2>(id);
+    m_buffer_mappings.insert(std::make_pair(id, D3D11Mapping(call, subres, start, end, discard)));
+}
+
+void D3D11Impl::removeMapping(const trace::Call& call, SubresourceId id)
+{
+    auto iter = m_buffer_mappings.find(id);
+    if (iter == m_buffer_mappings.end()) {
+        std::cerr << "Error: can't unmap unknown buffer mapping\n";
+        return;
+    }
+    auto mapping = iter->second;
+    mapping.finish(call);
+
+    auto res = lookup<D3D11Resource>(std::get<1>(id));
+    res->update(mapping);
+
+    m_buffer_mappings.erase(iter);
+}
+
+void D3D11Impl::memcpy(const trace::Call& call)
+{
+    auto start = call.arg(0).toUInt();
+    auto end = start + call.arg(2).toUInt();
+
+    for (auto&& [id, mapping]: m_buffer_mappings) {
+        if (mapping.start <= start && start < mapping.end) {
+            if (end > mapping.end) {
+                std::cerr << "\n:Error "<< call.no << "(memcpy): Mapped target range is ["
+                          << mapping.start << ", " << mapping.end << "] but data requires ["
+                          << start << ", " << end << "]\n";
+                assert(0);
+            }
+
+            mapping.update(call, start, end);
+            return;
+        }
+    }
+
+    std::cerr << "Found no mapping for memcopy to " << start << " in call " << call.no << ": " << call.name() << "\n";
+    assert(0);
+}
 
 }

@@ -116,6 +116,12 @@ void CallSet::insert(PTraceCall call)
     m_calls.insert(call);
 }
 
+void CallSet::append(CallSet& other)
+{
+    for (auto iter = other.begin(); iter != other.end(); iter++)
+        insert(*iter);
+}
+
 void CallSet::clear()
 {
     m_calls.clear();

@@ -69,6 +69,57 @@ OpenGLImpl::OpenGLImpl(bool keep_all_states):
     global_state.emit_dependencies = m_recording_frame;
 }
 
+unsigned
+OpenGLImpl::equalChars(const char *prefix, const char *callname)
+{
+    unsigned retval = 0;
+
+    const char *prefix_del = strstr(prefix, "::");
+    const char *callname_del = strstr(callname, "::");
+    if (prefix_del && callname_del) {
+        prefix = prefix_del;
+        callname = callname_del;
+    }
+
+    while (*prefix && *callname && *prefix == *callname) {
+        ++retval;
+        ++prefix; ++callname;
+    }
+    if (!*prefix && !*callname)
+        ++retval;
+
+    return !*prefix ? retval : 0;
+}
+        
+ft_callback
+OpenGLImpl::findCallback(const char *name)
+{
+    auto cb_range = m_call_table.equal_range(name);
+    if (cb_range.first != m_call_table.end() &&
+            std::distance(cb_range.first, cb_range.second) > 0) {
+
+        CallTable::const_iterator cb = cb_range.first;
+        CallTable::const_iterator i = cb_range.first;
+        ++i;
+
+        unsigned max_equal = equalChars(cb->first, name);
+
+        while (i != cb_range.second && i != m_call_table.end()) {
+            auto n = equalChars(i->first, name);
+            if (n > max_equal) {
+                max_equal = n;
+                cb = i;
+            }
+            ++i;
+        }
+
+        if (max_equal)
+            return cb->second;
+    }
+
+    return nullptr;
+}
+
 void OpenGLImpl::emitState()
 {
     m_matrix_states.emitStateTo(m_required_calls);

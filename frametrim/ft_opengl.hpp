@@ -63,10 +63,12 @@ public:
     OpenGLImpl(bool keep_all_states);
 
 protected:
+    ft_callback findCallback(const char *name);
     void emitState();
     bool skipDeleteObj(const trace::Call& call);
 
 private:
+    unsigned equalChars(const char *prefix, const char *callname);
     PTraceCall recordStateCall(const trace::Call& call, unsigned no_param_sel);
 
     void registerStateCalls();
@@ -135,6 +137,9 @@ private:
 
     void createContext(const trace::Call& call, int shared_param);
     void makeCurrent(const trace::Call& call, unsigned param);
+
+    using CallTable = std::multimap<const char *, ft_callback, string_part_less>;
+    CallTable m_call_table;
 
     DisplayListMap m_display_lists;
     UsedObject<unsigned>::Pointer m_active_display_list;

@@ -66,6 +66,15 @@ Call::argByName(const char *argName) const {
     return null;
 }
 
+unsigned
+Call::findArg(const char *argName) const {
+    for (unsigned i = 0; i < sig->num_args; ++i) {
+        if (strcmp(sig->arg_names[i], argName) == 0)
+            return i;
+    }
+    return 0;
+}
+
 
 String::~String() {
     delete [] value;

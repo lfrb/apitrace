@@ -42,15 +42,15 @@ FrameTrimmer::FrameTrimmer(bool keep_all_states):
 {
 }
 
-std::unique_ptr<FrameTrimmer>
+std::shared_ptr<FrameTrimmer>
 FrameTrimmer::create(trace::API api, bool keep_all_states)
 {
     if (api == trace::API_GL || api == trace::API_EGL) {
         std::cerr << "OpenGL trimmer\n";
-        return std::unique_ptr<FrameTrimmer>(new OpenGLImpl(keep_all_states));
+        return std::shared_ptr<FrameTrimmer>(new OpenGLImpl(keep_all_states));
     } else if (api == trace::API_DXGI || api == trace::API_UNKNOWN) {
         std::cerr << "D3D11 trimmer\n";
-        return std::unique_ptr<FrameTrimmer>(new D3D11Impl(keep_all_states));
+        return std::shared_ptr<FrameTrimmer>(new D3D11Impl(keep_all_states));
     } else {
         assert(0);
     }
@@ -87,38 +87,12 @@ FrameTrimmer::call(const trace::Call& call, Frametype frametype)
     if (icb != m_call_table_cache.end())
         icb->second(call);
     else {
-        auto cb_range = m_call_table.equal_range(call.name());
-        if (cb_range.first != m_call_table.end() &&
-                std::distance(cb_range.first, cb_range.second) > 0) {
+        auto func = findCallback(call.name());
 
-            CallTable::const_iterator cb = cb_range.first;
-            CallTable::const_iterator i = cb_range.first;
-            ++i;
-
-            unsigned max_equal = equalChars(cb->first, call_name);
-
-            while (i != cb_range.second && i != m_call_table.end()) {
-                auto n = equalChars(i->first, call_name);
-                if (n > max_equal) {
-                    max_equal = n;
-                    cb = i;
-                }
-                ++i;
-            }
-
-            if (max_equal) {
-                //if (strcmp(call.name(), cb->first))
-                //    std::cerr << "Handle " << call.name() << " as " << cb->first << "\n";
-                cb->second(call);
-                m_call_table_cache[call.name()] = cb->second;
-            } else {
-                if (m_unhandled_calls.find(call_name) == m_unhandled_calls.end()) {
-                    std::cerr << "Call " << call.no
-                              << " " << call_name << " not handled\n";
-                    m_unhandled_calls.insert(call_name);
-                }
-            }
-        } else  if (!(call.flags & trace::CALL_FLAG_END_FRAME)) {
+        if (func) {
+            m_call_table_cache[call.name()] = func;
+            func(call);
+        } else if (!(call.flags & trace::CALL_FLAG_END_FRAME)) {
             /* This should be some debug output only, because we might
              * not handle some calls deliberately */
             if (m_unhandled_calls.find(call_name) == m_unhandled_calls.end()) {
@@ -175,28 +149,6 @@ FrameTrimmer::getSortedCallIds()
                 make_sure_its_singular.end());
     std::sort(sorted_calls.begin(), sorted_calls.end());
     return sorted_calls;
-}
-
-unsigned
-FrameTrimmer::equalChars(const char *prefix, const char *callname)
-{
-    unsigned retval = 0;
-
-    const char *prefix_del = strstr(prefix, "::");
-    const char *callname_del = strstr(callname, "::");
-    if (prefix_del && callname_del) {
-        prefix = prefix_del;
-        callname = callname_del;
-    }
-
-    while (*prefix && *callname && *prefix == *callname) {
-        ++retval;
-        ++prefix; ++callname;
-    }
-    if (!*prefix && !*callname)
-        ++retval;
-
-    return !*prefix ? retval : 0;
 }
 
 }

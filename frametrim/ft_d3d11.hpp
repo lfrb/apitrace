@@ -57,6 +57,7 @@ enum ePerContextState {
     pc_viewport,
     pc_scissor,
     pc_primitive_topology,
+    STATE_FLAG_COUNT
 };
 
 enum eShaderStage {
@@ -80,6 +81,7 @@ enum ePerContextBinding {
     pcb_depth_stencil_view,
     pcb_unordered_access_views,
     pcb_stream_out_targets,
+    BINDING_TYPE_COUNT
 };
 
 enum eResourceType {
@@ -89,178 +91,529 @@ enum eResourceType {
     rt_texture_3d,
 };
 
-struct D3D11Device;
+class D3D11Impl;
+class D3D11Device;
 
-class D3D11DeviceChild: public UsedObject<void *> {
-public:
-    using Pointer = std::shared_ptr<D3D11DeviceChild>;
+class Object;
+using ImplPtr = std::shared_ptr<D3D11Impl>;
+using DepSet = std::unordered_set<std::shared_ptr<Object>>;
 
-    D3D11DeviceChild(void *id);
+struct string_less {
+    bool operator () (const char *lhs, const char *rhs) const
+    {
+        return strcmp(lhs, rhs) < 0;
+    }
 };
 
-using SubresourceId = std::pair<void *, unsigned>;
-using ObjectBindings = std::unordered_map<unsigned, std::map<unsigned, D3D11DeviceChild::Pointer> >;
+static unsigned ifacelen (const char *start)
+{
+    const char *end = strstr(start, "::");
 
-class D3D11Resource: public D3D11DeviceChild {
-public:
-    enum eResourceType m_kind;
-    union {
-        unsigned m_size;
-        unsigned m_height;
-        unsigned m_depth;
-    };
+    if (!end)
+        return strlen(start);
 
-    D3D11Resource(void *id, eResourceType kind, unsigned size);
+    while (end > start) {
+        const char *prev = end - 1;
+        if (!isdigit(*prev))
+            return (end - start);
+        end = prev;
+    }
 
-    unsigned getMappedSize(unsigned width_stride, unsigned depth_stride);
+    return 0;
+}
+
+struct string_iface_less {
+    bool operator () (const char *lhs, const char *rhs) const
+    {
+        int len = std::max(ifacelen(lhs), ifacelen(rhs));
+        return strncmp(lhs, rhs, len) < 0;
+    }
 };
 
-class D3D11View: public D3D11DeviceChild {
+struct D3D11Box {
+    D3D11Box(unsigned left, unsigned top, unsigned front, unsigned right, unsigned bottom, unsigned back);
+    bool isEmpty() const;
+
+    unsigned left;
+    unsigned top;
+    unsigned front;
+    unsigned right;
+    unsigned bottom;
+    unsigned back;
+};
+
+struct D3D11Mapping {
+    unsigned subres;
+    unsigned long long start;
+    unsigned long long end;
+    unsigned range_min;
+    unsigned range_max;
+    std::vector<PTraceCall> calls;
+    bool discard;
+
+    D3D11Mapping(const trace::Call& call, unsigned subres, unsigned long long begin,
+                 unsigned long long end, bool discard);
+    void update(const trace::Call& call, unsigned long long begin, unsigned long long end);
+    void finish(const trace::Call& call);
+};
+
+class Interface {
 public:
-    D3D11View(void *id, D3D11Resource::Pointer res);
+    using Pointer = std::shared_ptr<Interface>;
+
+    Interface(const char *name);
+    Interface(const char *name, Pointer parent);
+    void addCall(const char *name, ft_callback callback);
+
+    ft_callback findCall(const char *name);
 
 private:
-    D3D11Resource::Pointer m_resource;
+    const char *m_name;
+    Pointer m_parent;
+    std::map<const char *, ft_callback, string_less> m_call_table;
 };
 
-class D3D11Context: public D3D11DeviceChild {
+class Object: public std::enable_shared_from_this<Object> {
 public:
-    using Pointer = std::shared_ptr<D3D11Context>;
+    using Pointer = std::shared_ptr<Object>;
 
-    D3D11Context(void *id, std::shared_ptr<D3D11Device> device);
+    Object(ImplPtr impl, void *id);
 
-    ObjectBindings& getBindingsOfType(ePerContextBinding binding_type);
+    void *id() { return m_id; };
+    bool isUnrolled() const { return m_unrolled; };
 
-    std::map<unsigned, PTraceCall> m_state_calls;
-    std::map<unsigned, D3D11DeviceChild::Pointer> m_state_deps;
+    PTraceCall getInitCall() const;
+    void setInitCall(const trace::Call& call);
+    void addCall(const trace::Call& call);
+    void addCall(PTraceCall call);
+    void clearCalls();
+    bool hasDependency(Pointer dep);
+    void addDependency(Pointer dep);
+    void addDependencies(Pointer child, const trace::Array *deps);
+    const DepSet& dependencies() const { return m_dependencies; };
+    void moveTo(Pointer other);
+    void copyTo(Pointer other);
+    void emitInitCallsTo(CallSet& out_list);
+    void emitCallsTo(CallSet& out_list, DepSet& dep_list);
+    void emitCallsTo(CallSet& out_list);
+    bool emitted() const;
+    void unroll();
 
-    /* Bindings */
-    ObjectBindings m_shaders;
-    ObjectBindings m_samplers;
-    ObjectBindings m_input_layout;
-    ObjectBindings m_vertex_buffers;
-    ObjectBindings m_index_buffer;
-    ObjectBindings m_constant_buffers;
-    ObjectBindings m_shader_resources;
-    ObjectBindings m_render_targets;
-    ObjectBindings m_depth_stencil_view;
-    ObjectBindings m_unordered_access_views;
-    ObjectBindings m_stream_out_targets;
+    template <class T>
+    std::shared_ptr<T> lookup(void* obj_id);
+
+    template <class T>
+    std::shared_ptr<T> get(const trace::Call &call, unsigned obj_id_param_id);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> create(const trace::Call& call, unsigned param_id, Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> getOrCreate(const trace::Call& call, const char *obj_id_param, Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> createWithDep(const trace::Call& call, unsigned obj_id_param,
+                             unsigned dep_id_param, Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> fakeCreate(const trace::Call& call, Args... args);
+
+    void callOnObject(const trace::Call& call, ePerDevice map_type, unsigned id_param);
+    void callOnObjectWithDep(const trace::Call& call, ePerDevice map_type, unsigned id_param,
+                             ePerDevice dep_type, unsigned dep_id_param);
+
+    void AddRef(const trace::Call& call);
+    void Release(const trace::Call& call);
+    void QueryInterface(const trace::Call& call);
+
+protected:
+    virtual void emit(CallSet& out_list, DepSet& dep_list) {};
+    std::weak_ptr<D3D11Impl> m_impl;
 
 private:
-    std::weak_ptr<D3D11Device> m_device;
+    void *m_id; 
+    unsigned m_refcount;
+
+    PTraceCall m_init_call;
+    CallSet m_calls;
+    DepSet m_dependencies;
+    bool m_emitted;
+    bool m_emitting;
+    bool m_unrolled;
 };
 
-class DXGIObject: public UsedObject<void *> {
+class DXGIObject: public Object {
 public:
     using Pointer = std::shared_ptr<DXGIObject>;
 
-    DXGIObject(void *id);
+    DXGIObject(ImplPtr impl, void *id);
+
+    void GetParent(const trace::Call &call);
+
+protected:
+    virtual void getParent(const trace::Call &call) = 0;
+};
+
+class DXGIDevice: public DXGIObject {
+public:
+    DXGIDevice(ImplPtr impl, void *id);
+
+protected:
+    virtual void getParent(const trace::Call &call);
+};
+
+class DXGIAdapter: public DXGIObject {
+public:
+    DXGIAdapter(ImplPtr impl, void *id);
+
+protected:
+    virtual void getParent(const trace::Call &call);
 };
 
 class DXGISwapChain: public DXGIObject {
 public:
     using Pointer = std::shared_ptr<DXGISwapChain>;
 
-    DXGISwapChain(void *id, unsigned width, unsigned height);
-    void resizeBuffers(unsigned width, unsigned height);
-    unsigned getHeight() const;
+    DXGISwapChain(ImplPtr impl, void *id, unsigned width, unsigned height);
+
+    void ResizeBuffers(const trace::Call& call);
+    void ResizeTarget(const trace::Call& call);
+    void GetBuffer(const trace::Call& call);
+    void Present(const trace::Call& call);
+
+protected:
+    virtual void getParent(const trace::Call &call);
 
 private:
     unsigned m_width;
     unsigned m_height;
 };
 
-class D3D11Device: public UsedObject<void *>  {
+class DXGIFactory: public DXGIObject {
 public:
-    using Pointer = std::shared_ptr<D3D11Device>;
-    using ObjectPtr = D3D11DeviceChild::Pointer;
+    using Pointer = std::shared_ptr<DXGISwapChain>;
 
-    D3D11Device(void *id);
+    DXGIFactory(ImplPtr impl, void *id);
 
-    D3D11Context::Pointer m_context;
-    // TODO deferred contexts
-};
-
-class D3D11Impl : public FrameTrimmer {
-public:
-    D3D11Impl(bool keep_all_states);
+    void CreateSwapChain(const trace::Call& call);
+    void CreateSwapChainForHwnd(const trace::Call& call);
+    void EnumAdapters(const trace::Call& call);
 
 protected:
-    void emitState();
-    bool skipDeleteObj(const trace::Call& call);
+    virtual void getParent(const trace::Call &call);
+};
+
+class D3D11DeviceChild: public Object {
+public:
+    using Pointer = std::shared_ptr<D3D11DeviceChild>;
+
+    D3D11DeviceChild(ImplPtr impl, void *id);
+};
+
+class D3D11State {
+public:
+    D3D11State(const trace::Call& call);
+    D3D11State(const trace::Call& call, D3D11DeviceChild::Pointer dep);
+    D3D11State(const D3D11State& other);
+
+    void addTo(Object::Pointer dst);
 
 private:
-    void registerDeviceCalls();
-    void registerContextCalls();
+    PTraceCall m_call;
+    D3D11DeviceChild::Pointer m_dep;
+};
 
-    void recordRequiredCall(const trace::Call& call);
+class D3D11Binding: public D3D11DeviceChild {
+public:
+    using Pointer = std::shared_ptr<D3D11Binding>;
 
-    void updateCallTable(const std::vector<const char*>& names,
-                           ft_callback cb);
+    D3D11Binding(ImplPtr impl, void *id, D3D11DeviceChild::Pointer bound_obj);
 
-    void releaseDXGIObject(const trace::Call& call);
-    void releaseDevice(const trace::Call& call);
-    void releaseDeviceChild(const trace::Call& call);
-    void release(const trace::Call& call, eObjectType kind);
+    template<class T>
+    std::shared_ptr<T> get();
 
-    void createDXGIFactory(const trace::Call& call);
-    void enumAdapters(const trace::Call& call);
-    void createSwapChain(const trace::Call& call);
-    void resizeBuffers(const trace::Call& call);
-    void resizeTarget(const trace::Call& call);
-    void getBuffer(const trace::Call& call);
-    void createDevice(const trace::Call& call);
-    D3D11Device::Pointer getDevice(const trace::Call& call);
-    D3D11Context::Pointer getContext(const trace::Call& call);
-    void getImmediateContext(const trace::Call& call);
+private:
+    D3D11DeviceChild::Pointer m_bound_obj;
+};
 
-    void addDependencies(D3D11DeviceChild::Pointer child, const trace::Array *deps);
-    void create(const trace::Call& call, ePerDevice object_type, unsigned obj_id_param);
-    void createWithDep(const trace::Call& call, ePerDevice object_type, unsigned obj_id_param,
-                       ePerDevice dep_type, unsigned dep_id_param);
+struct Bindings {
+    using ObjectBindings = std::unordered_map<unsigned, std::map<unsigned, D3D11Binding::Pointer>>;
+    ObjectBindings& operator [](const int& index) { return m_bindings[index]; };
+
+    void merge(Bindings& other) {
+        for (int i = 0; i < BINDING_TYPE_COUNT; i++)
+            m_bindings[i].merge(other.m_bindings[i]);
+    };
+
+private:
+    ObjectBindings m_bindings[BINDING_TYPE_COUNT];
+};
+
+using SubresourceId = std::tuple<void *, void *, unsigned>;
+using States = std::unordered_map<unsigned, D3D11State>;
+typedef bool(*FilterFn)(unsigned, unsigned, D3D11DeviceChild::Pointer obj);
+
+class D3D11Operation: public D3D11DeviceChild {
+public:
+    using Pointer = std::shared_ptr<D3D11Operation>;
+
+    D3D11Operation(ImplPtr impl, void *id, bool deferred);
+    virtual void link(States& states, Bindings& bindings) = 0;
+
+protected:
+    void addStates(States& states);
+    void addBoundAsDependency(Bindings& bindings, enum ePerContextBinding pcb, bool compute);
+    void addToBound(Bindings& bindings, enum ePerContextBinding pcb);
+    void addToBoundView(Bindings& bindings, enum ePerContextBinding pcb, bool compute, FilterFn filter);
+
+private:
+    bool m_deferred;
+};
+
+class D3D11Draw: public D3D11Operation {
+public:
+    using Pointer = std::shared_ptr<D3D11Draw>;
+
+    D3D11Draw(ImplPtr impl, void *id, bool deferred);
+    virtual void link(States& states, Bindings& bindings);
+};
+
+class D3D11Dispatch: public D3D11Operation {
+public:
+    using Pointer = std::shared_ptr<D3D11Draw>;
+
+    D3D11Dispatch(ImplPtr impl, void *id, bool deferred);
+    virtual void link(States& states, Bindings& bindings);
+};
+
+class D3D11Resource: public D3D11DeviceChild {
+public:
+    using Pointer = std::shared_ptr<D3D11Resource>;
+
+    D3D11Resource(ImplPtr impl, void *id);
+
+    void addUpdateCall(const trace::Call& call);
+    void addUpdateDependency(Object::Pointer dep);
+    virtual void update(const trace::Call& call, unsigned subres, D3D11Box *box, unsigned size);
+    virtual void update(D3D11Mapping& mapping);
+    virtual void clear();
+    virtual unsigned getMappedSize(unsigned width_stride, unsigned depth_stride) = 0;
+    virtual bool hasBindFlag(unsigned flag) { return false; };
+
+protected:
+    virtual void emit(CallSet& out_list, DepSet& dep_list);
+
+private:
+    std::vector<PTraceCall> m_update_calls;
+    DepSet m_update_dependencies;
+};
+
+class D3D11Buffer: public D3D11Resource {
+public:
+    D3D11Buffer(ImplPtr impl, void *id, unsigned size);
+
+    struct Update {
+        unsigned begin;
+        unsigned end;
+        std::vector<PTraceCall> calls;
+    };
+
+    virtual void update(const trace::Call& call, unsigned subres, D3D11Box *box, unsigned size);
+    virtual void update(D3D11Mapping& mapping);
+    void updateBuffer(std::vector<PTraceCall> &calls, unsigned subres, unsigned begin, unsigned end);
+    virtual void clear();
+    virtual unsigned getMappedSize(unsigned width_stride, unsigned depth_stride);
+
+protected:
+    virtual void emit(CallSet& out_list, DepSet& dep_list);
+
+private:
+    unsigned m_size;
+    std::vector<Update> m_updates;
+};
+
+class D3D11Texture1D: public D3D11Resource {
+public:
+    D3D11Texture1D(ImplPtr impl, void *id);
+
+    virtual unsigned getMappedSize(unsigned width_stride, unsigned depth_stride);
+};
+
+class D3D11Texture2D: public D3D11Resource {
+public:
+    D3D11Texture2D(ImplPtr impl, void *id, unsigned height, unsigned bind_flags);
+
+    virtual unsigned getMappedSize(unsigned width_stride, unsigned depth_stride);
+    virtual bool hasBindFlag(unsigned flag) { return m_bind_flags & flag; };
+
+private:
+    unsigned m_height;
+    unsigned m_bind_flags;
+};
+
+class D3D11Texture3D: public D3D11Resource {
+public:
+    D3D11Texture3D(ImplPtr impl, void *id, unsigned depth);
+
+    virtual unsigned getMappedSize(unsigned width_stride, unsigned depth_stride);
+
+private:
+    unsigned m_depth;
+};
+
+class D3D11View: public D3D11DeviceChild {
+public:
+    D3D11View(ImplPtr impl, void *id, D3D11Resource::Pointer res);
+
+    void addUpdateCall(const trace::Call& call);
+    void addUpdateDependency(Object::Pointer dep);
+    void clear(const trace::Call& call);
+    bool hasBindFlag(unsigned flag) { return m_resource->hasBindFlag(flag); };
+
+private:
+    D3D11Resource::Pointer m_resource;
+};
+
+class D3D11CommandList: public D3D11DeviceChild {
+public:
+    D3D11CommandList(ImplPtr impl, void *id);
+};
+
+class D3D11Context: public D3D11DeviceChild {
+public:
+    using Pointer = std::shared_ptr<D3D11Context>;
+
+    D3D11Context(ImplPtr impl, void *id, bool deferred = false);
+
+    void SetState(const trace::Call& call, ePerContextState state_flag);
+    void ClearView(const trace::Call& call);
+    void ClearState(const trace::Call& call);
+
+    void BindState(const trace::Call& call, ePerContextState state_flag);
+    void SetShader(const trace::Call& call, unsigned bindpoint);
+    void BindRenderTargets(const trace::Call& call);
+    void BindRenderTargetsAndUAVS(const trace::Call& call);
+    void GetBoundRenderTargets(const trace::Call& call);
+
+    void FinishCommandList(const trace::Call& call);
+    void ExecuteCommandList(const trace::Call& call);
+
+    void Map(const trace::Call& call);
+    void Unmap(const trace::Call& call);
+    void UpdateSubresource(const trace::Call& call);
+    void CopyResource(const trace::Call& call);
+    void CopySubresourceRegion(const trace::Call& call);
+    void CopyStructureCount(const trace::Call& call);
+
+    void Draw(const trace::Call& call);
+    void DrawIndirect(const trace::Call& call);
+    void Dispatch(const trace::Call& call);
+    void DispatchIndirect(const trace::Call& call);
+
+    void Begin(const trace::Call& call);
+    void End(const trace::Call& call);
+
     void bindObject(const trace::Call& call, ePerContextBinding binding_type,
                     unsigned bindpoint, unsigned slot, void *bound_obj_id);
     void bindObjects(const trace::Call& call, ePerContextBinding binding_type, unsigned bindpoint,
                      unsigned slot, unsigned ids_param);
     void bindSlot(const trace::Call& call, ePerContextBinding binding_type, unsigned id_param);
     void bindSlots(const trace::Call& call, ePerContextBinding binding_type, unsigned bindpoint);
-    void callOnObject(const trace::Call& call, ePerDevice map_type, unsigned id_param);
-    void callOnObjectWithDep(const trace::Call& call, ePerDevice map_type, unsigned id_param,
-                             ePerDevice dep_type, unsigned dep_id_param);
 
-    void createState(const trace::Call& call);
-    void setState(const trace::Call& call, ePerContextState state_flag);
-    void bindState(const trace::Call& call, ePerContextState state_flag);
-    void clearState(const trace::Call& call);
+private:
+    bool m_deferred;
 
-    void createShader(const trace::Call& call);
-    void createShaderWithStreamOutput(const trace::Call& call);
-    void bindShader(const trace::Call& call, unsigned bindpoint);
+    States m_states;
+    Bindings m_bindings;
+    std::vector<D3D11Operation::Pointer> m_operations;
 
-    void createResource(const trace::Call& call, eResourceType kind, unsigned size);
-    void createBuffer(const trace::Call& call);
-    void createTexture1D(const trace::Call& call);
-    void createTexture2D(const trace::Call& call);
-    void createTexture3D(const trace::Call& call);
+    void addOperation(D3D11Operation::Pointer op);
+};
 
-    void createView(const trace::Call& call);
-    void clearView(const trace::Call& call);
-    void bindRenderTargets(const trace::Call& call);
-    void bindRenderTargetsAndUAVS(const trace::Call& call);
+class D3D11Device: public Object  {
+public:
+    using Pointer = std::shared_ptr<D3D11Device>;
+    using ObjectPtr = D3D11DeviceChild::Pointer;
 
-    void createAsync(const trace::Call& call);
+    D3D11Device(ImplPtr impl, void *id);
 
-    void memcopy(const trace::Call& call);
-    void map(const trace::Call& call);
-    void unmap(const trace::Call& call);
-    void copyResource(const trace::Call& call, unsigned dst_param_id, unsigned src_param_id);
-    void draw(const trace::Call& call);
+    D3D11Context::Pointer m_context;
+    // TODO deferred contexts
 
-    std::unordered_map<void *, DXGIObject::Pointer> m_dxgi_objects;
-    std::unordered_map<void *, D3D11Device::Pointer> m_devices;
-    std::unordered_map<void *, D3D11DeviceChild::Pointer> m_children;
-    std::map<SubresourceId, std::pair<uintptr_t, uintptr_t>> m_buffer_mappings;
+    void GetImmediateContext(const trace::Call& call);
+    void CreateDeferredContext(const trace::Call& call);
+
+    void CreateState(const trace::Call& call);
+    void CreateShader(const trace::Call& call);
+    void CreateGeometryShaderWithStreamOutput(const trace::Call& call);
+    void CreateBuffer(const trace::Call& call);
+    void CreateTexture1D(const trace::Call& call);
+    void CreateTexture2D(const trace::Call& call);
+    void CreateTexture3D(const trace::Call& call);
+    void CreateView(const trace::Call& call);
+    void CreateAsync(const trace::Call& call);
+    void CreateClassLinkage(const trace::Call& call);
+    void CreateInputLayout(const trace::Call& call);
+};
+
+class D3D11Impl : public FrameTrimmer, public std::enable_shared_from_this<D3D11Impl> {
+public:
+    D3D11Impl(bool keep_all_states);
+
+    bool isRecording() { return m_recording_frame; }
+    void recordObject(Object::Pointer obj);
+    void recordObjectInit(Object::Pointer obj);
+
+    template<class T>
+    std::shared_ptr<T> lookup(void* obj_id);
+
+    template<class T>
+    std::shared_ptr<T> get(const trace::Call& call, unsigned obj_id_param_id);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> create(const trace::Call& call, Object::Pointer parent,
+                              unsigned obj_id_param_id, Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> createWithDep(const trace::Call& call, Object::Pointer parent,
+                                     unsigned obj_id_param, unsigned dep_id_param,
+                                     Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> getOrCreate(const trace::Call& call, Object::Pointer parent,
+                                   unsigned obj_id_param_id, Args... args);
+
+    template<class T, typename... Args>
+    std::shared_ptr<T> fakeCreate(const trace::Call& call, Object::Pointer parent,
+                                   Args... args);
+
+    void addMapping(const trace::Call& call, SubresourceId id,
+                    unsigned long long start, unsigned long long end,
+                    bool discard);
+    void removeMapping(const trace::Call& call, SubresourceId id);
+
+protected:
+    ft_callback findCallback(const char *name);
+    void emitState();
+    bool skipDeleteObj(const trace::Call& call);
+
+private:
+    void registerInterfaces();
+
+    void recordRequiredCall(const trace::Call& call);
+
+    void CreateDXGIFactory(const trace::Call& call);
+    void D3D11CreateDevice(const trace::Call& call);
+    void D3D11CreateDeviceAndSwapChain(const trace::Call& call);
+    void memcpy(const trace::Call& call);
+
+    void addDependencies(D3D11DeviceChild::Pointer child, const trace::Array *deps);
+
+    std::map<const char *, ft_callback, string_less> m_call_table;
+    std::map<const char *, Interface::Pointer, string_iface_less> m_interfaces;
+    std::unordered_map<void *, Object::Pointer> m_objects;
+
+    std::map<SubresourceId, D3D11Mapping> m_buffer_mappings;
     std::map<unsigned, PTraceCall> m_state_calls;
     std::map<unsigned, PTraceCall> m_enables;
 };

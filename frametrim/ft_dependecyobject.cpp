@@ -90,9 +90,27 @@ void UsedObject<T>::setDependency(Pointer dep)
 
 template <class T>
 void
+UsedObject<T>::moveTo(Pointer other)
+{
+    other->m_calls = std::move(m_calls);
+    other->m_dependencies = std::move(m_dependencies);
+    other->m_emitted = false;
+}
+
+template <class T>
+void
+UsedObject<T>::copyTo(Pointer other)
+{
+    other->m_calls.insert(other->m_calls.end(), m_calls.begin(), m_calls.end());
+    other->m_dependencies.insert(other->m_dependencies.end(), m_dependencies.begin(), m_dependencies.end());
+    other->m_emitted = false;
+}
+
+template <class T>
+void
 UsedObject<T>::emitCallsTo(CallSet& out_list)
 {
-    if (m_emitting)
+    if (this->m_emitting)
         return;
 
     m_emitting = true;

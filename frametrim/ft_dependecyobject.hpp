@@ -46,6 +46,8 @@ public:
     void addDependency(Pointer dep);
     void setDependency(Pointer dep);
 
+    void moveTo(Pointer other);
+    void copyTo(Pointer other);
     void emitCallsTo(CallSet& out_list);
     bool emitted() const;
 
