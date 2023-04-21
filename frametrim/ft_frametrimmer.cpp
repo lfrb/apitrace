@@ -37,6 +37,7 @@ namespace frametrim {
 
 FrameTrimmer::FrameTrimmer(bool keep_all_states):
     m_keep_all_state_calls(keep_all_states),
+    m_frame_no(0),
     m_recording_frame(false),
     m_last_frame_start(0)
 {
@@ -80,6 +81,8 @@ FrameTrimmer::call(const trace::Call& call, Frametype frametype)
      * if we are in the last frame and the object was created in an earlier frame.
      * By not deleting such objects looping the last frame will work in more cases */
     if (skipDeleteObj(call)) {
+        if (call.flags & trace::CALL_FLAG_END_FRAME)
+            m_frame_no++;
         return;
     }
 
@@ -122,6 +125,9 @@ FrameTrimmer::call(const trace::Call& call, Frametype frametype)
                 m_last_swap = c;
         }
     }
+
+    if (call.flags & trace::CALL_FLAG_END_FRAME)
+        m_frame_no++;
 }
 
 void FrameTrimmer::finalize()

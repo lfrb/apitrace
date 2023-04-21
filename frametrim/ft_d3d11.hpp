@@ -349,49 +349,13 @@ private:
     ObjectBindings m_bindings[BINDING_TYPE_COUNT];
 };
 
-using SubresourceId = std::tuple<void *, void *, unsigned>;
-using States = std::unordered_map<unsigned, D3D11State>;
-typedef bool(*FilterFn)(unsigned, unsigned, D3D11DeviceChild::Pointer obj);
-
-class D3D11Operation: public D3D11DeviceChild {
-public:
-    using Pointer = std::shared_ptr<D3D11Operation>;
-
-    D3D11Operation(ImplPtr impl, void *id, bool deferred);
-    virtual void link(States& states, Bindings& bindings) = 0;
-
-protected:
-    void addStates(States& states);
-    void addBoundAsDependency(Bindings& bindings, enum ePerContextBinding pcb, bool compute);
-    void addToBound(Bindings& bindings, enum ePerContextBinding pcb);
-    void addToBoundView(Bindings& bindings, enum ePerContextBinding pcb, bool compute, FilterFn filter);
-
-private:
-    bool m_deferred;
-};
-
-class D3D11Draw: public D3D11Operation {
-public:
-    using Pointer = std::shared_ptr<D3D11Draw>;
-
-    D3D11Draw(ImplPtr impl, void *id, bool deferred);
-    virtual void link(States& states, Bindings& bindings);
-};
-
-class D3D11Dispatch: public D3D11Operation {
-public:
-    using Pointer = std::shared_ptr<D3D11Draw>;
-
-    D3D11Dispatch(ImplPtr impl, void *id, bool deferred);
-    virtual void link(States& states, Bindings& bindings);
-};
-
 class D3D11Resource: public D3D11DeviceChild {
 public:
     using Pointer = std::shared_ptr<D3D11Resource>;
 
     D3D11Resource(ImplPtr impl, void *id);
 
+    void setUpdateFrame();
     void addUpdateCall(const trace::Call& call);
     void addUpdateDependency(Object::Pointer dep);
     virtual void update(const trace::Call& call, unsigned subres, D3D11Box *box, unsigned size);
@@ -404,6 +368,7 @@ protected:
     virtual void emit(CallSet& out_list, DepSet& dep_list);
 
 private:
+    uint32_t m_last_update_frame;
     std::vector<PTraceCall> m_update_calls;
     DepSet m_update_dependencies;
 };
@@ -463,6 +428,8 @@ private:
 
 class D3D11View: public D3D11DeviceChild {
 public:
+    using Pointer = std::shared_ptr<D3D11View>;
+
     D3D11View(ImplPtr impl, void *id, D3D11Resource::Pointer res);
 
     void addUpdateCall(const trace::Call& call);
@@ -474,9 +441,61 @@ private:
     D3D11Resource::Pointer m_resource;
 };
 
+using SubresourceId = std::tuple<void *, void *, unsigned>;
+using States = std::unordered_map<unsigned, D3D11State>;
+typedef bool(*FilterFn)(unsigned, unsigned, D3D11DeviceChild::Pointer obj);
+
+class D3D11Operation: public D3D11DeviceChild {
+public:
+    using Pointer = std::shared_ptr<D3D11Operation>;
+
+    D3D11Operation(ImplPtr impl, void *id, bool deferred);
+
+    uint32_t frameNo() const { return m_frame_no; };
+    virtual void link(States& states, Bindings& bindings) = 0;
+    void execute(uint32_t frame_no);
+
+protected:
+    void addStates(States& states);
+    void addBoundAsDependency(Bindings& bindings, enum ePerContextBinding pcb, bool compute);
+    void addToBound(Bindings& bindings, enum ePerContextBinding pcb);
+    void addToBoundView(Bindings& bindings, enum ePerContextBinding pcb, bool compute, FilterFn filter);
+
+private:
+    bool m_deferred;
+    uint32_t m_frame_no;
+    std::vector<D3D11View::Pointer> m_delayed_targets;
+};
+
+class D3D11Draw: public D3D11Operation {
+public:
+    using Pointer = std::shared_ptr<D3D11Draw>;
+
+    D3D11Draw(ImplPtr impl, void *id, bool deferred);
+    virtual void link(States& states, Bindings& bindings);
+};
+
+class D3D11Dispatch: public D3D11Operation {
+public:
+    using Pointer = std::shared_ptr<D3D11Draw>;
+
+    D3D11Dispatch(ImplPtr impl, void *id, bool deferred);
+    virtual void link(States& states, Bindings& bindings);
+};
+
+using OpList = std::vector<D3D11Operation::Pointer>;
+
 class D3D11CommandList: public D3D11DeviceChild {
 public:
     D3D11CommandList(ImplPtr impl, void *id);
+
+    virtual void emit(CallSet& out_list, DepSet& dep_list);
+    const OpList& operations() const { return m_operations; };
+    void addOperation(D3D11Operation::Pointer op);
+    void execute();
+
+private:
+    OpList m_operations;
 };
 
 class D3D11Context: public D3D11DeviceChild {
@@ -525,7 +544,7 @@ private:
 
     States m_states;
     Bindings m_bindings;
-    std::vector<D3D11Operation::Pointer> m_operations;
+    OpList m_operations;
 
     void addOperation(D3D11Operation::Pointer op);
 };

@@ -65,6 +65,7 @@ public:
 
     void finalize();
 
+    uint32_t getFrameNo() const { return m_frame_no; };
     std::vector<unsigned> getSortedCallIds();
     std::unordered_set<unsigned> getUniqueCallIds();
 
@@ -78,6 +79,7 @@ protected:
 
     bool m_keep_all_state_calls;
     bool m_recording_frame;
+    uint32_t m_frame_no;
     uint32_t m_last_frame_start;
     PTraceCall m_last_swap;
     CallSet m_required_calls;

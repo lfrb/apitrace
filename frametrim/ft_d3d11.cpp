@@ -214,11 +214,6 @@ void Object::addDependencies(Object::Pointer child, const trace::Array *deps)
 void Object::moveTo(Pointer other)
 {
     /* Don't move the init call */
-    other->m_calls = std::move(m_calls);
-    other->m_dependencies = std::move(m_dependencies);
-    other->m_emitted = false;
-
-    m_calls.clear();
     m_dependencies.clear();
 }
 
@@ -274,14 +269,22 @@ void Object::emitCallsTo(CallSet& out_list)
     if (this->m_emitting)
         return;
 
-    emitCallsTo(out_list, dep_list);
-    if (dep_list.empty())
-        return;
-
     m_emitting = true;
-    std::cout << id() << " before emitting unrolled deps: " << dep_list.size() << "\n";
-    for (auto&& o: dep_list)
-        o->emitCallsTo(out_list);
+    m_emitted = true;
+    {
+        out_list.insert(m_init_call);
+        out_list.append(m_calls);
+
+        for (auto&& o : m_dependencies) {
+            o->emitCallsTo(out_list);
+        }
+
+        // TODO two version of emit()?
+        emit(out_list, dep_list);
+        for (auto&& o : dep_list) {
+            o->emitCallsTo(out_list);
+        }
+    }
     m_emitting = false;
 }
 
@@ -294,14 +297,8 @@ void Object::unroll()
 {
     DepSet dep_list;
 
-    for (auto&& o : m_dependencies) {
-        if (o->m_unrolled)
-            dep_list.insert(o);
-        else
-            o->emitCallsTo(m_calls, dep_list);
-    }
-
-    std::cout << id() << " unrolled from " << m_dependencies.size() << " to " << dep_list.size() << " deps\n";
+    emitCallsTo(m_calls, dep_list);
+    std::cout << "unrolled to " << m_calls.size() << " calls and " << dep_list.size() << " deps\n";
     m_dependencies = std::move(dep_list);
     m_unrolled = true;
 }
@@ -698,9 +695,21 @@ D3D11Operation::addToBoundView(Bindings& bindings, enum ePerContextBinding pcb, 
                 continue;
             if (filter && !filter(bindpoint, slot, view))
                 continue;
-            view->addUpdateDependency(shared_from_this());
+
+            m_delayed_targets.push_back(view);
         }
     }
+}
+
+void
+D3D11Operation::execute(uint32_t frame_no)
+{
+    m_frame_no = frame_no;
+    unroll();
+    for (auto&& target: m_delayed_targets) {
+        target->addUpdateDependency(shared_from_this());
+    }
+    m_delayed_targets.clear();
 }
 
 D3D11Draw::D3D11Draw(ImplPtr impl, void *id, bool deferred):
@@ -726,6 +735,7 @@ D3D11Draw::link(States& states, Bindings& bindings)
     addBoundAsDependency(bindings, pcb_render_targets);
     addBoundAsDependency(bindings, pcb_depth_stencil_view);
 
+    /* Only care about render targets that can also act as shader resources */
     auto check = [](unsigned bindpoint, unsigned slot, D3D11DeviceChild::Pointer obj) {
         if (!obj)
             return false;
@@ -755,13 +765,25 @@ D3D11Dispatch::link(States& states, Bindings& bindings)
 }
 
 D3D11Resource::D3D11Resource(ImplPtr impl, void *id):
-    D3D11DeviceChild(impl, id)
+    D3D11DeviceChild(impl, id),
+    m_last_update_frame(0)
 {
+}
+
+void
+D3D11Resource::setUpdateFrame()
+{
+    uint32_t frame_no = m_impl.lock()->getFrameNo();
+    if (m_last_update_frame != frame_no) {
+        //clear();
+        m_last_update_frame = frame_no;
+    }
 }
 
 void
 D3D11Resource::addUpdateCall(const trace::Call& call)
 {
+    setUpdateFrame();
     m_update_calls.push_back(trace2call(call));
     std::cout << this << " has " << m_update_calls.size() << " calls\n";
 }
@@ -769,6 +791,7 @@ D3D11Resource::addUpdateCall(const trace::Call& call)
 void
 D3D11Resource::addUpdateDependency(Object::Pointer dep)
 {
+    setUpdateFrame();
     assert(dep);
     m_update_dependencies.insert(dep);
     std::cout << id() << " has " << m_update_dependencies.size() << " dependencies\n";
@@ -784,6 +807,7 @@ D3D11Resource::update(const trace::Call& call, unsigned subres, D3D11Box *box, u
 void
 D3D11Resource::update(D3D11Mapping& mapping)
 {
+    setUpdateFrame();
     if (mapping.discard)
         clearCalls();
     for (auto &&call: mapping.calls) {
@@ -803,7 +827,6 @@ D3D11Resource::emit(CallSet& out_list, DepSet& dep_list)
 {
     for (auto &&n : m_update_calls)
         out_list.insert(n);
-    m_update_calls.clear(); // XXX
 
     for (auto &&o : m_update_dependencies) {
         if (o->isUnrolled())
@@ -865,7 +888,6 @@ D3D11Buffer::updateBuffer(std::vector<PTraceCall> &calls, unsigned subres, unsig
         it++;
     }
 
-    std::cout << "updating buffer from " << begin << " to " << end << "\n";
     Update update {begin, end, calls};
     m_updates.push_back(update);
 }
@@ -970,8 +992,6 @@ D3D11Context::bindObject(const trace::Call& call, ePerContextBinding binding_typ
 
     if (bound_obj_id)
         assert(bound_obj);
-    if (bound_obj_id == (void *)0x429f90 && m_impl.lock()->isRecording())
-        std::cout << "fdfsdf\n";
 
     if (bound_obj)
         m_impl.lock()->recordObjectInit(bound_obj);
@@ -1021,18 +1041,28 @@ D3D11Context::FinishCommandList(const trace::Call& call)
     // TODO auto restore = call.arg(1).toBool();
     auto cmdlist = create<D3D11CommandList>(call, 2);
     assert(m_deferred);
-    moveTo(cmdlist);
-    cmdlist->addCall(getInitCall());
+    for (auto&& op: m_operations) {
+        cmdlist->addOperation(op);
+    }
+    m_operations.clear();
+    cmdlist->addDependency(shared_from_this());
 }
 
 void
 D3D11Context::ExecuteCommandList(const trace::Call& call)
 {
-    // XXX Merge bindings and state
     auto cmdlist = get<D3D11CommandList>(call, 1);
 
-    if (!m_deferred)
-        cmdlist->unroll();
+    if (m_deferred) {
+        /* Merge command list operations into deferred context */
+        addCall(call);
+        addDependency(cmdlist);
+        for (auto&& op: cmdlist->operations())
+            m_operations.push_back(op);
+    } else {
+        cmdlist->addCall(call);
+        cmdlist->execute();
+    }
     m_impl.lock()->recordObject(cmdlist);
 }
 
@@ -1189,9 +1219,11 @@ D3D11Context::addOperation(D3D11Operation::Pointer op)
 
     op->link(m_states, m_bindings);
     if (m_deferred) {
-        addDependency(op);
+        m_operations.push_back(op);
     } else {
-        op->unroll();
+        uint32_t frame_no = m_impl.lock()->getFrameNo();
+
+        op->execute(frame_no);
         m_impl.lock()->recordObject(op);
     }
 }
@@ -1248,6 +1280,27 @@ D3D11Context::End(const trace::Call& call)
 D3D11CommandList::D3D11CommandList(ImplPtr impl, void *id):
     D3D11DeviceChild(impl, id)
 {
+}
+
+void
+D3D11CommandList::emit(CallSet& out_list, DepSet& dep_list)
+{
+}
+
+void
+D3D11CommandList::addOperation(D3D11Operation::Pointer op)
+{
+    op->addDependency(shared_from_this());
+    m_operations.push_back(op);
+}
+
+void
+D3D11CommandList::execute()
+{
+    uint32_t frame_no = m_impl.lock()->getFrameNo();
+    for (auto&& op: m_operations) {
+        op->execute(frame_no);
+    }
 }
 
 D3D11Impl::D3D11Impl(bool keep_all_states):
