@@ -121,7 +121,7 @@ private:
     std::map<std::string, Metric_opengl*> nameLookup;
 
     // bools
-    bool supportsDisjoint, supportsTimestamp, supportsElapsed, supportsOcclusion;
+    bool supportsDisjoint, supportsTimerQuery, supportsTimestamp, supportsElapsed, supportsOcclusion;
     bool glQueriesNeeded[QUERY_BOUNDARY_LIST_END];
     bool glQueriesNeededAnyBoundary;
     bool cpugpuSync;
@@ -132,6 +132,9 @@ private:
 
     unsigned curPass;
     int64_t curDisjoint;
+
+    PFN_GLQUERYCOUNTER _glQueryCounter;
+    PFN_GLGETQUERYOBJECTI64V _glGetQueryObjecti64v;
 
     std::vector<Metric_opengl> metrics;
     // storage for metrics

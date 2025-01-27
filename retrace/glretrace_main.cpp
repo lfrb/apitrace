@@ -77,9 +77,13 @@ struct CallQuery
 };
 
 static bool supportsDisjoint = false;
+static bool supportsTimerQuery = false; /* use core API */
 static bool supportsElapsed = true;
 static bool supportsTimestamp = true;
 static bool supportsOcclusion = true;
+
+static PFN_GLQUERYCOUNTER _glQueryCounter = NULL;
+static PFN_GLGETQUERYOBJECTI64V _glGetQueryObjecti64v = NULL;
 
 static std::list<CallQuery> callQueries;
 
@@ -204,25 +208,12 @@ getTimeFrequency(void) {
     }
 }
 
-static inline void
-queryTimestamp(GLuint query) {
-    if (supportsDisjoint) {
-        glQueryCounterEXT(query, GL_TIMESTAMP_EXT);
-    } else {
-        glQueryCounter(query, GL_TIMESTAMP);
-    }
-}
-
 static inline int64_t
 getQueryResult(GLuint query) {
     int64_t result = 0;
 
-    if (supportsDisjoint) {
-        glGetQueryObjecti64vEXT(query, GL_QUERY_RESULT_EXT, &result);
-    } else if (supportsTimestamp) {
-        glGetQueryObjecti64v(query, GL_QUERY_RESULT, &result);
-    } else if (supportsElapsed) {
-        glGetQueryObjecti64vEXT(query, GL_QUERY_RESULT, &result);
+    if (_glGetQueryObjecti64v) {
+        _glGetQueryObjecti64vEXT(query, GL_QUERY_RESULT, &result);
     } else {
         uint32_t result32;
         glGetQueryObjectuiv(query, GL_QUERY_RESULT, &result32);
@@ -334,7 +325,7 @@ beginProfile(trace::Call &call, bool isDraw) {
     /* GPU profiling only for draw calls */
     if (isDraw) {
         if (retrace::profilingGpuTimes) {
-            queryTimestamp(query.ids[GPU_START]);
+            _glQueryCounter(query.ids[GPU_START], GL_TIMESTAMP);
             glBeginQuery(GL_TIME_ELAPSED, query.ids[GPU_DURATION]);
         }
 
@@ -457,11 +448,20 @@ initContext() {
     /* Ensure we have adequate extension support */
     glfeatures::Profile currentProfile = currentContext->actualProfile();
     supportsDisjoint    = currentContext->hasExtension("GL_EXT_disjoint_timer_query");
-    supportsTimestamp   = currentProfile.versionGreaterOrEqual(glfeatures::API_GL, 3, 3) ||
-                          currentContext->hasExtension("GL_ARB_timer_query") || supportsDisjoint;
+    supportsTimerQuery  = currentProfile.versionGreaterOrEqual(glfeatures::API_GL, 3, 3) ||
+                          currentContext->hasExtension("GL_ARB_timer_query");
+    supportsTimestamp   = supportsTimerQuery || supportsDisjoint;
     supportsElapsed     = currentContext->hasExtension("GL_EXT_timer_query") || supportsTimestamp;
     supportsOcclusion   = currentProfile.versionGreaterOrEqual(glfeatures::API_GL, 1, 5);
     supportsARBShaderObjects = currentContext->hasExtension("GL_ARB_shader_objects");
+
+    if (supportsTimerQuery) {
+        _glQueryCounter = glQueryCounter;
+        _glGetQueryObjecti64v = glGetQueryObjecti64v;
+    } else if (supportsElapsed) {
+        _glQueryCounter = glQueryCounterEXT;
+        _glGetQueryObjecti64v = glGetQueryObjecti64vEXT;
+    }
 
     currentContext->KHR_debug = currentContext->hasExtension("GL_KHR_debug");
     if (currentContext->KHR_debug) {
